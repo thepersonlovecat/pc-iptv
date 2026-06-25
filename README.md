@@ -24,6 +24,28 @@ K20 IPTV Player is a **fully-featured, open-source IPTV client** for Windows des
 
 ---
 
+## 📸 Screenshots
+
+### 🖥️ Single Screen Mode — 4K Live TV
+![K20 IPTV Player - Single Screen](screenshots/screenshot_1screen.png)
+*Watching a 4K FIFA World Cup channel in single-screen mode. Dark glassmorphism UI with channel list, category filters (4K / FHD / HD), and live channel status badges.*
+
+---
+
+### ⊞ Quad View — 4 Channels Simultaneously
+![K20 IPTV Player - 4-Screen Quad View](screenshots/screenshot_4screen.png)
+*Quad-view (2×2) layout streaming 4 different 4K sports channels at the same time — all hardware-accelerated.*
+
+---
+
+### 🎬 Quad View Content — Close-up
+![K20 IPTV Player - Quad View Content](screenshots/screenshot_4screen_content.png)
+*Four-panel view: NOW Sports 4K, Fussball.TV UHD, a live football match, and a 4K sports channel — all playing simultaneously with zero frame drops.*
+
+---
+
+
+
 ## 🚀 Features
 
 ### 🎬 Playback
