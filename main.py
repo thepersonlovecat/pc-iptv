@@ -519,6 +519,7 @@ class MpvSignals(QObject):
     volume_changed = Signal(int)
     file_loaded = Signal()
     buffering_event = Signal(bool)
+    idle_changed = Signal(bool)
 
 
 # Cache/buffer sizes preset configuration
@@ -1125,6 +1126,7 @@ class MpvWidget(QWidget):
         
         self.signals = MpvSignals()
         self.signals.buffering_event.connect(self.on_buffering_state_changed)
+        self.signals.idle_changed.connect(self.on_mpv_idle_changed)
         self.player = None
         
         self.config = config_manager.load_config()
@@ -1212,9 +1214,8 @@ class MpvWidget(QWidget):
                         
                 @self.player.property_observer('idle-active')
                 def on_idle_change(_self, value):
-                    if value and getattr(self, 'is_playing_state', False):
-                        if self.reconnect_count < self.max_reconnects:
-                            self.reconnect_timer.start(2000)
+                    if value is not None:
+                        self.signals.idle_changed.emit(bool(value))
                             
                 @self.player.property_observer('paused-for-cache')
                 def on_cache_pause_change(_self, value):
@@ -1241,6 +1242,11 @@ class MpvWidget(QWidget):
                     self.buffering_count = 0
                 except Exception as e:
                     print(f"Could not dynamically adjust buffer: {e}")
+
+    def on_mpv_idle_changed(self, is_idle):
+        if is_idle and getattr(self, 'is_playing_state', False):
+            if self.reconnect_count < self.max_reconnects:
+                self.reconnect_timer.start(2000)
 
     def show_message(self, message, duration=3000):
         if self.player:
