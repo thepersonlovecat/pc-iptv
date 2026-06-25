@@ -3406,7 +3406,11 @@ class K20IPTVPlayer(QMainWindow):
             self.channel_list.addItem(_t("empty_playlist_error"))
             return
             
-        # EPG loading removed
+        # Automatic EPG Loading
+        active_epg = epg_url or self.get_active_epg_url()
+        if active_epg:
+            print(f"[+] Found EPG URL: {active_epg}. Starting background update.")
+            self.start_epg_update(active_epg)
             
         groups = sorted(list(set(c.get("group", "Default") for c in self.channels)))
         
