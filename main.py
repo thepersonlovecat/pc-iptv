@@ -2529,7 +2529,10 @@ class K20IPTVPlayer(QMainWindow):
         # Load FontAwesome 6 Solid Font for UI Icons
         from PySide6.QtGui import QFontDatabase
         if getattr(sys, 'frozen', False):
-            _script_dir = os.path.dirname(sys.executable)
+            if hasattr(sys, '_MEIPASS'):
+                _script_dir = sys._MEIPASS
+            else:
+                _script_dir = os.path.dirname(sys.executable)
         else:
             _script_dir = os.path.dirname(os.path.abspath(__file__))
         fa_path = os.path.join(_script_dir, "fa-solid-900.ttf")
