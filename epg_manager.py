@@ -6,16 +6,15 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timezone, timedelta
 import shutil
 import threading
+import sys
+import sqlite3
 
 # Local cache for EPG
-import sys
 if getattr(sys, 'frozen', False):
     script_dir = os.path.dirname(sys.executable)
 else:
     script_dir = os.path.dirname(os.path.abspath(__file__))
 EPG_CACHE_DIR = os.path.join(script_dir, "epg_cache")
-EPG_DATA = {} # channel_id/name -> list of programmes
-epg_lock = threading.Lock()
 
 def parse_xmltv_time(time_str):
     """
@@ -48,6 +47,56 @@ def parse_xmltv_time(time_str):
         print(f"Error parsing time {time_str}: {e}")
         return None
 
+def normalize_name(name):
+    if not name:
+        return ""
+    name = name.lower().strip()
+    name = re.sub(r'\b(hd|sd|fhd|uhd|hevc|4k|1080p|720p)\b', '', name)
+    name = re.sub(r'[^a-z0-9]', '', name)
+    return name
+
+def get_db_conn():
+    os.makedirs(EPG_CACHE_DIR, exist_ok=True)
+    db_path = os.path.join(EPG_CACHE_DIR, "epg_cache.db")
+    return sqlite3.connect(db_path)
+
+def init_db():
+    try:
+        conn = get_db_conn()
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS programmes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                channel_id TEXT,
+                start_time INTEGER,
+                stop_time INTEGER,
+                title TEXT,
+                desc TEXT,
+                UNIQUE(channel_id, start_time) ON CONFLICT IGNORE
+            )
+        """)
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_programmes_channel ON programmes(channel_id)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_programmes_start ON programmes(start_time)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_programmes_stop ON programmes(stop_time)")
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"[-] Error initializing EPG database: {e}")
+
+def cleanup_old_epg():
+    try:
+        now_ts = int(datetime.now().timestamp())
+        cutoff = now_ts - 86400  # 24 hours ago
+        conn = get_db_conn()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM programmes WHERE stop_time < ?", (cutoff,))
+        deleted_count = cursor.rowcount
+        conn.commit()
+        conn.close()
+        print(f"[+] EPG Auto-cleanup: deleted {deleted_count} outdated programmes.")
+    except Exception as e:
+        print(f"[-] Error cleaning up old EPG: {e}")
+
 def download_epg(url):
     """
     Downloads EPG XML/GZ file(s) in a background friendly way.
@@ -60,13 +109,17 @@ def download_epg(url):
     if not urls:
         return False
         
-    # Re-create clean cache directory
+    # Clean up old XML/GZ files in cache directory
     try:
-        if os.path.exists(EPG_CACHE_DIR):
-            shutil.rmtree(EPG_CACHE_DIR)
         os.makedirs(EPG_CACHE_DIR, exist_ok=True)
+        for f in os.listdir(EPG_CACHE_DIR):
+            if f.endswith(".xml") or f.endswith(".gz"):
+                try:
+                    os.remove(os.path.join(EPG_CACHE_DIR, f))
+                except Exception:
+                    pass
     except Exception as e:
-        print(f"[-] Error creating EPG cache directory: {e}")
+        print(f"[-] Error cleaning EPG cache directory: {e}")
         return False
         
     headers = {
@@ -100,11 +153,8 @@ def download_epg(url):
 
 def load_epg_cache():
     """
-    Loads and parses all files in the EPG cache directory.
-    Uses thread-safe temporary storage to avoid race conditions.
+    Loads and parses all XML files in the EPG cache directory and inserts them into SQLite.
     """
-    global EPG_DATA
-    
     if not os.path.exists(EPG_CACHE_DIR):
         return False
         
@@ -116,12 +166,23 @@ def load_epg_cache():
     if not cache_files:
         return False
         
-    temp_epg_data = {}
+    init_db()
+    cleanup_old_epg()
+    
     parsed_any = False
     for cache_file in cache_files:
-        print(f"[*] Parsing EPG Cache file: {os.path.basename(cache_file)}...")
+        print(f"[*] Parsing EPG Cache file into SQLite: {os.path.basename(cache_file)}...")
         try:
+            conn = get_db_conn()
+            cursor = conn.cursor()
+            
+            # Performance tuning for SQLite batch operations
+            cursor.execute("PRAGMA synchronous = OFF")
+            cursor.execute("PRAGMA journal_mode = MEMORY")
+            
             context = ET.iterparse(cache_file, events=('end',))
+            batch = []
+            
             for event, elem in context:
                 if elem.tag == 'programme':
                     channel = elem.get('channel')
@@ -138,57 +199,102 @@ def load_epg_cache():
                     stop_dt = parse_xmltv_time(stop_str)
                     
                     if channel and start_dt and stop_dt:
-                        prog = {
-                            'start': start_dt,
-                            'stop': stop_dt,
-                            'title': title,
-                            'desc': desc
-                        }
-                        if channel not in temp_epg_data:
-                            temp_epg_data[channel] = []
-                        temp_epg_data[channel].append(prog)
-                    
+                        start_ts = int(start_dt.timestamp())
+                        stop_ts = int(stop_dt.timestamp())
+                        batch.append((channel, start_ts, stop_ts, title, desc))
+                        
+                        if len(batch) >= 1000:
+                            cursor.executemany("""
+                                INSERT OR IGNORE INTO programmes (channel_id, start_time, stop_time, title, desc)
+                                VALUES (?, ?, ?, ?, ?)
+                            """, batch)
+                            batch = []
+                            
                     elem.clear()
                 elif elem.tag == 'channel':
                     elem.clear()
+                    
+            if batch:
+                cursor.executemany("""
+                    INSERT OR IGNORE INTO programmes (channel_id, start_time, stop_time, title, desc)
+                    VALUES (?, ?, ?, ?, ?)
+                """, batch)
+                
+            conn.commit()
+            conn.close()
             parsed_any = True
         except Exception as e:
             print(f"[-] Error parsing EPG cache file {os.path.basename(cache_file)}: {e}")
             
     if parsed_any:
-        # Sort programmes by start time
-        for channel in temp_epg_data:
-            temp_epg_data[channel].sort(key=lambda x: x['start'])
-            
-        # Thread-safe pointer assignment
-        with epg_lock:
-            EPG_DATA = temp_epg_data
-            
-        print(f"[+] Loaded EPG data for {len(temp_epg_data)} channels from all sources.")
+        print("[+] Loaded EPG data into SQLite cache successfully.")
         return True
         
     return False
 
 def get_schedule(tvg_id, channel_name):
     """
-    Returns the schedule list of dicts for a channel.
-    Uses a shallow copy to prevent size modifications during iteration.
+    Returns the schedule list of dicts for a channel from SQLite.
     """
-    with epg_lock:
-        local_epg_data = EPG_DATA.copy()
+    try:
+        conn = get_db_conn()
+        cursor = conn.cursor()
         
-    key = tvg_id if tvg_id in local_epg_data else None
-    if not key:
-        # Try matching by name
-        for chan_id in local_epg_data:
-            if channel_name.lower().strip() in chan_id.lower() or chan_id.lower() in channel_name.lower():
-                key = chan_id
-                break
+        # Get all unique channel IDs to execute matching algorithm
+        cursor.execute("SELECT DISTINCT channel_id FROM programmes")
+        db_channels = [r[0] for r in cursor.fetchall()]
+        
+        key = tvg_id if tvg_id in db_channels else None
+        if not key:
+            norm_channel = normalize_name(channel_name)
+            if norm_channel:
+                # 1. Exact match of normalized name
+                for chan_id in db_channels:
+                    if normalize_name(chan_id) == norm_channel:
+                        key = chan_id
+                        break
                 
-    if not key:
-        return []
+                # 2. Substring match of normalized name (avoid false matches with numeric suffixes)
+                if not key:
+                    for chan_id in db_channels:
+                        norm_id = normalize_name(chan_id)
+                        if norm_channel in norm_id or norm_id in norm_channel:
+                            # Prevent false positives (e.g. VTV3 and VTV30)
+                            m1 = re.search(r'\d+$', norm_channel)
+                            m2 = re.search(r'\d+$', norm_id)
+                            if m1 and m2 and m1.group() != m2.group():
+                                continue
+                            key = chan_id
+                            break
+                            
+        if not key:
+            conn.close()
+            return []
+            
+        # Query programmes for the matched key
+        cursor.execute("""
+            SELECT start_time, stop_time, title, desc 
+            FROM programmes 
+            WHERE channel_id = ? 
+            ORDER BY start_time ASC
+        """, (key,))
+        rows = cursor.fetchall()
+        conn.close()
         
-    return local_epg_data[key]
+        schedule = []
+        for r in rows:
+            start_dt = datetime.fromtimestamp(r[0], tz=timezone.utc).astimezone()
+            stop_dt = datetime.fromtimestamp(r[1], tz=timezone.utc).astimezone()
+            schedule.append({
+                'start': start_dt,
+                'stop': stop_dt,
+                'title': r[2],
+                'desc': r[3]
+            })
+        return schedule
+    except Exception as e:
+        print(f"[-] Error querying schedule: {e}")
+        return []
 
 def get_current_program(tvg_id, channel_name):
     """
@@ -204,3 +310,6 @@ def get_current_program(tvg_id, channel_name):
             return prog
             
     return None
+
+# Auto-initialize database when the module is imported
+init_db()

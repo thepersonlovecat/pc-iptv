@@ -201,7 +201,8 @@ TRANSLATIONS = {
         "edit_url_title": "Sửa URL M3U",
         "edit_local_title": "Sửa Playlist Cục Bộ",
         "label_file_path": "Đường dẫn file:",
-        "cannot_delete_only_playlist": "Không thể xóa playlist duy nhất."
+        "cannot_delete_only_playlist": "Không thể xóa playlist duy nhất.",
+        "label_epg_url": "Đường dẫn EPG (Gộp nhiều EPG dùng dấu phẩy):"
     },
     "en": {
         "settings_title": "IPTV Player Settings",
@@ -341,7 +342,8 @@ TRANSLATIONS = {
         "edit_url_title": "Edit M3U URL",
         "edit_local_title": "Edit Local Playlist",
         "label_file_path": "File Path:",
-        "cannot_delete_only_playlist": "Cannot delete the only playlist."
+        "cannot_delete_only_playlist": "Cannot delete the only playlist.",
+        "label_epg_url": "EPG URL (Merge multiple EPGs with commas):"
     },
     "cn": {
         "settings_title": "IPTV 播放器设置",
@@ -481,7 +483,8 @@ TRANSLATIONS = {
         "edit_url_title": "修改 URL M3U",
         "edit_local_title": "修改本地播放列表",
         "label_file_path": "文件路径:",
-        "cannot_delete_only_playlist": "无法删除唯一的播放列表。"
+        "cannot_delete_only_playlist": "无法删除唯一的播放列表。",
+        "label_epg_url": "EPG 地址 (使用逗号合并多个 EPG):"
     }
 }
 
@@ -1131,6 +1134,7 @@ class MpvWidget(QWidget):
         
         self.config = config_manager.load_config()
         self.current_url = None
+        self.current_channel = {}
         self.recording_path = None
         self.recording_start_time = None
         
@@ -1262,10 +1266,20 @@ class MpvWidget(QWidget):
             return parent.overlay
         return None
 
-    def play(self, url):
+    def play(self, url_or_channel):
         if self.player:
             try:
-                self.current_url = url
+                if isinstance(url_or_channel, dict):
+                    self.current_channel = url_or_channel
+                    self.current_url = url_or_channel.get("url", "")
+                else:
+                    self.current_channel = {"url": url_or_channel}
+                    self.current_url = url_or_channel
+                    
+                url = self.current_url
+                ua = self.current_channel.get("user-agent", "")
+                ref = self.current_channel.get("referer", "")
+                
                 self.is_playing_state = True
                 self.reconnect_count = 0
                 self.reconnect_timer.stop()
@@ -1290,6 +1304,16 @@ class MpvWidget(QWidget):
                 def do_play():
                     if getattr(self, 'is_playing_state', False) and self.current_url == url:
                         try:
+                            if ua:
+                                self.player['user-agent'] = ua
+                            else:
+                                self.player['user-agent'] = "VLC/3.0.18 LibVLC/3.0.18"
+                                
+                            if ref:
+                                self.player['referrer'] = ref
+                            else:
+                                self.player['referrer'] = ""
+                                
                             self.player.play(url)
                         except Exception as play_err:
                             print(f"Deferred play failed: {play_err}")
@@ -1339,6 +1363,17 @@ class MpvWidget(QWidget):
         print(f"[*] Stream lost. Reconnect attempt {self.reconnect_count}/{self.max_reconnects} for {self.current_url}")
         
         try:
+            if hasattr(self, 'current_channel') and isinstance(self.current_channel, dict):
+                ua = self.current_channel.get("user-agent", "")
+                ref = self.current_channel.get("referer", "")
+                if ua:
+                    self.player['user-agent'] = ua
+                else:
+                    self.player['user-agent'] = "VLC/3.0.18 LibVLC/3.0.18"
+                if ref:
+                    self.player['referrer'] = ref
+                else:
+                    self.player['referrer'] = ""
             self.player.play(self.current_url)
         except Exception as e:
             print(f"[-] Reconnect play failed: {e}")
@@ -1467,6 +1502,19 @@ class MpvWidget(QWidget):
             self.recording_path = filepath
             self.recording_start_time = time.time()
             
+            # Apply headers before reloading for recording
+            if hasattr(self, 'current_channel') and isinstance(self.current_channel, dict):
+                ua = self.current_channel.get("user-agent", "")
+                ref = self.current_channel.get("referer", "")
+                if ua:
+                    self.player['user-agent'] = ua
+                else:
+                    self.player['user-agent'] = "VLC/3.0.18 LibVLC/3.0.18"
+                if ref:
+                    self.player['referrer'] = ref
+                else:
+                    self.player['referrer'] = ""
+                    
             # Set record-file option before loading the stream
             self.player['record-file'] = filepath
             # Reload stream to start recording
@@ -1491,6 +1539,19 @@ class MpvWidget(QWidget):
             self.recording_path = None
             if hasattr(self, 'rec_timer'):
                 self.rec_timer.stop()
+                
+            # Apply headers before reloading to stop recording
+            if hasattr(self, 'current_channel') and isinstance(self.current_channel, dict):
+                ua = self.current_channel.get("user-agent", "")
+                ref = self.current_channel.get("referer", "")
+                if ua:
+                    self.player['user-agent'] = ua
+                else:
+                    self.player['user-agent'] = "VLC/3.0.18 LibVLC/3.0.18"
+                if ref:
+                    self.player['referrer'] = ref
+                else:
+                    self.player['referrer'] = ""
             
             # Clear record-file option
             self.player['record-file'] = ""
@@ -1876,19 +1937,48 @@ class PlaylistManagerDialog(QDialog):
         )
         if file_path:
             name = os.path.basename(file_path)
-            new_pl = {"name": name, "url": file_path, "is_local": True}
+            dialog = QDialog(self)
+            dialog.setWindowTitle(_t("btn_add_file"))
+            dialog.resize(400, 180)
+            dialog.setStyleSheet(self.styleSheet())
             
-            if any(p["url"] == file_path for p in self.config["playlists"]):
-                return
-                
-            self.config["playlists"].append(new_pl)
-            config_manager.save_config(self.config)
-            self.populate_list()
+            d_layout = QFormLayout(dialog)
+            name_input = QLineEdit(dialog)
+            name_input.setText(name)
+            path_input = QLineEdit(dialog)
+            path_input.setText(file_path)
+            path_input.setReadOnly(True)
+            epg_input = QLineEdit(dialog)
+            epg_input.setPlaceholderText("http://example.com/epg.xml")
+            
+            d_layout.addRow(_t("label_playlist_name"), name_input)
+            d_layout.addRow(_t("label_file_path"), path_input)
+            d_layout.addRow(_t("label_epg_url"), epg_input)
+            
+            bbox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
+            bbox.accepted.connect(dialog.accept)
+            bbox.rejected.connect(dialog.reject)
+            d_layout.addRow(bbox)
+            
+            if dialog.exec() == QDialog.Accepted:
+                name = name_input.text().strip()
+                if name:
+                    new_pl = {
+                        "name": name,
+                        "url": file_path,
+                        "is_local": True,
+                        "epg_url": epg_input.text().strip()
+                    }
+                    if any(p["url"] == file_path for p in self.config["playlists"]):
+                        return
+                    self.config["playlists"].append(new_pl)
+                    config_manager.save_config(self.config)
+                    self.populate_list()
 
     def add_url_playlist(self):
         dialog = QDialog(self)
         dialog.setWindowTitle(_t("add_url_title"))
-        dialog.resize(400, 150)
+        dialog.resize(400, 180)
         dialog.setStyleSheet(self.styleSheet())
         
         d_layout = QFormLayout(dialog)
@@ -1896,9 +1986,12 @@ class PlaylistManagerDialog(QDialog):
         name_input.setPlaceholderText(_t("placeholder_playlist_name"))
         url_input = QLineEdit(dialog)
         url_input.setPlaceholderText("http://example.com/playlist.m3u")
+        epg_input = QLineEdit(dialog)
+        epg_input.setPlaceholderText("http://example.com/epg.xml")
         
         d_layout.addRow(_t("label_playlist_name"), name_input)
         d_layout.addRow(_t("label_url_path"), url_input)
+        d_layout.addRow(_t("label_epg_url"), epg_input)
         
         bbox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
         bbox.accepted.connect(dialog.accept)
@@ -1909,7 +2002,12 @@ class PlaylistManagerDialog(QDialog):
             name = name_input.text().strip()
             url = url_input.text().strip()
             if name and url:
-                new_pl = {"name": name, "url": url, "is_local": False}
+                new_pl = {
+                    "name": name,
+                    "url": url,
+                    "is_local": False,
+                    "epg_url": epg_input.text().strip()
+                }
                 if any(p["url"] == url for p in self.config["playlists"]):
                     return
                 self.config["playlists"].append(new_pl)
@@ -2049,7 +2147,7 @@ class PlaylistManagerDialog(QDialog):
         elif not pl.get("is_local"):
             dialog = QDialog(self)
             dialog.setWindowTitle(_t("edit_url_title"))
-            dialog.resize(400, 150)
+            dialog.resize(400, 180)
             dialog.setStyleSheet(self.styleSheet())
             
             d_layout = QFormLayout(dialog)
@@ -2057,9 +2155,13 @@ class PlaylistManagerDialog(QDialog):
             name_input.setText(pl.get("name", ""))
             url_input = QLineEdit(dialog)
             url_input.setText(pl.get("url", ""))
+            epg_input = QLineEdit(dialog)
+            epg_input.setText(pl.get("epg_url", ""))
+            epg_input.setPlaceholderText("http://example.com/epg.xml")
             
             d_layout.addRow(_t("label_playlist_name"), name_input)
             d_layout.addRow(_t("label_url_path"), url_input)
+            d_layout.addRow(_t("label_epg_url"), epg_input)
             
             bbox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
             bbox.accepted.connect(dialog.accept)
@@ -2069,11 +2171,13 @@ class PlaylistManagerDialog(QDialog):
             if dialog.exec() == QDialog.Accepted:
                 name = name_input.text().strip()
                 url = url_input.text().strip()
+                epg = epg_input.text().strip()
                 if name and url:
                     self.config["playlists"][pl_idx] = {
                         "name": name,
                         "url": url,
-                        "is_local": False
+                        "is_local": False,
+                        "epg_url": epg
                     }
                     if self.config.get("active_playlist_url") == old_url:
                         self.config["active_playlist_url"] = url
@@ -2084,7 +2188,7 @@ class PlaylistManagerDialog(QDialog):
         else:
             dialog = QDialog(self)
             dialog.setWindowTitle(_t("edit_local_title"))
-            dialog.resize(400, 150)
+            dialog.resize(400, 180)
             dialog.setStyleSheet(self.styleSheet())
             
             d_layout = QFormLayout(dialog)
@@ -2092,9 +2196,13 @@ class PlaylistManagerDialog(QDialog):
             name_input.setText(pl.get("name", ""))
             path_input = QLineEdit(dialog)
             path_input.setText(pl.get("url", ""))
+            epg_input = QLineEdit(dialog)
+            epg_input.setText(pl.get("epg_url", ""))
+            epg_input.setPlaceholderText("http://example.com/epg.xml")
             
             d_layout.addRow(_t("label_display_name"), name_input)
             d_layout.addRow(_t("label_file_path"), path_input)
+            d_layout.addRow(_t("label_epg_url"), epg_input)
             
             bbox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
             bbox.accepted.connect(dialog.accept)
@@ -2104,11 +2212,13 @@ class PlaylistManagerDialog(QDialog):
             if dialog.exec() == QDialog.Accepted:
                 name = name_input.text().strip()
                 path = path_input.text().strip()
+                epg = epg_input.text().strip()
                 if name and path:
                     self.config["playlists"][pl_idx] = {
                         "name": name,
                         "url": path,
-                        "is_local": True
+                        "is_local": True,
+                        "epg_url": epg
                     }
                     if self.config.get("active_playlist_url") == old_url:
                         self.config["active_playlist_url"] = path
@@ -3604,6 +3714,12 @@ class K20IPTVPlayer(QMainWindow):
             name = channel.get("name", "")
             stream_url = channel.get("url", "")
             
+            # Lookup full channel in playlist if user-agent is not present (e.g. from history/favorites)
+            if self.current_view in ("favorites", "history") or not channel.get("user-agent"):
+                matched_channel = next((c for c in self.channels if c.get("url") == stream_url), None)
+                if matched_channel:
+                    channel = matched_channel
+                    
             # Set titles on player header
             self.lbl_channel_title.setText(f"[Màn {self.active_player_idx + 1}] - {name}")
             self.lbl_epg_now.setText("")
@@ -3611,7 +3727,7 @@ class K20IPTVPlayer(QMainWindow):
             # Play in active screen
             if MPV_AVAILABLE:
                 active_frame = self.player_frames[self.active_player_idx]
-                active_frame.mpv_widget.play(stream_url)
+                active_frame.mpv_widget.play(channel)
                 self.btn_play.setText("\uf04c")
                 
                 # Show and raise glass controls above mpv native surface after play starts
