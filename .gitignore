@@ -33,3 +33,7 @@ snapshots/
 *.njsproj
 *.sln
 *.sw?
+
+# Build directories
+build/
+dist/

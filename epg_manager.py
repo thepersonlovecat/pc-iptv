@@ -8,7 +8,11 @@ import shutil
 import threading
 
 # Local cache for EPG
-script_dir = os.path.dirname(os.path.abspath(__file__))
+import sys
+if getattr(sys, 'frozen', False):
+    script_dir = os.path.dirname(sys.executable)
+else:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
 EPG_CACHE_DIR = os.path.join(script_dir, "epg_cache")
 EPG_DATA = {} # channel_id/name -> list of programmes
 epg_lock = threading.Lock()

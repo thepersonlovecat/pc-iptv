@@ -19,20 +19,36 @@ try:
 except Exception:
     pass
 
-# Setup DLL search path for Windows to find libmpv DLLs in the script's directory
+# Setup DLL search path for Windows to find libmpv DLLs
 if sys.platform == 'win32':
+    dll_dirs = []
+    if getattr(sys, 'frozen', False):
+        if hasattr(sys, '_MEIPASS'):
+            dll_dirs.append(sys._MEIPASS)
+        dll_dirs.append(os.path.dirname(sys.executable))
+    
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    if hasattr(os, 'add_dll_directory'):
-        try:
-            os.add_dll_directory(script_dir)
-        except Exception:
-            pass
-    os.environ['PATH'] = script_dir + os.pathsep + os.environ['PATH']
+    dll_dirs.append(script_dir)
+    
+    # Remove duplicates preserving order
+    seen = set()
+    dll_dirs = [x for x in dll_dirs if x and x not in seen and not seen.add(x)]
+    
+    for d in dll_dirs:
+        if os.path.exists(d):
+            if hasattr(os, 'add_dll_directory'):
+                try:
+                    os.add_dll_directory(d)
+                except Exception:
+                    pass
+            os.environ['PATH'] = d + os.pathsep + os.environ['PATH']
 
 # Import local modules
 from m3u_parser import parse_m3u
 import config_manager
 import epg_manager
+
+# FontAwesome 6 Solid is loaded dynamically inside K20IPTVPlayer.__init__ to prevent early Qt instantiation crash.
 
 # Import mpv (with safe fallback check)
 try:
@@ -507,7 +523,11 @@ CACHE_PRESETS = {
 import hashlib
 from PySide6.QtGui import QPixmap
 
-_LOGO_CACHE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logo_cache")
+if getattr(sys, 'frozen', False):
+    script_dir = os.path.dirname(sys.executable)
+else:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+_LOGO_CACHE_DIR = os.path.join(script_dir, "logo_cache")
 os.makedirs(_LOGO_CACHE_DIR, exist_ok=True)
 _logo_mem_cache: dict = {}  # url -> QPixmap (in-memory, per session)
 
@@ -917,7 +937,10 @@ class PlaylistDownloadWorker(QThread):
             
             if not channels:
                 # Fallback to script-relative path
-                script_dir = os.path.dirname(os.path.abspath(__file__))
+                if getattr(sys, 'frozen', False):
+                    script_dir = os.path.dirname(sys.executable)
+                else:
+                    script_dir = os.path.dirname(os.path.abspath(__file__))
                 script_relative = os.path.join(script_dir, self.path_or_url)
                 if os.path.exists(script_relative):
                     channels, epg_url = parse_m3u(script_relative)
@@ -2443,6 +2466,27 @@ class SettingsDialog(QDialog):
 class K20IPTVPlayer(QMainWindow):
     def __init__(self):
         super().__init__()
+        
+        # Load FontAwesome 6 Solid Font for UI Icons
+        from PySide6.QtGui import QFontDatabase
+        if getattr(sys, 'frozen', False):
+            _script_dir = os.path.dirname(sys.executable)
+        else:
+            _script_dir = os.path.dirname(os.path.abspath(__file__))
+        fa_path = os.path.join(_script_dir, "fa-solid-900.ttf")
+        if os.path.exists(fa_path):
+            font_id = QFontDatabase.addApplicationFont(fa_path)
+            if font_id != -1:
+                font_families = QFontDatabase.applicationFontFamilies(font_id)
+                if font_families:
+                    print(f"[+] Loaded icon font family: {font_families[0]}")
+                else:
+                    print("[+] Loaded icon font family but name empty")
+            else:
+                print("[-] Failed to add FontAwesome application font")
+        else:
+            print(f"[-] FontAwesome font not found at {fa_path}")
+            
         self.setWindowTitle("K20 IPTV Player")
         self.resize(1400, 800)
         self.setMinimumSize(1000, 600)
@@ -2669,21 +2713,21 @@ class K20IPTVPlayer(QMainWindow):
         line.setObjectName("SidebarLine")
         layout.addWidget(line)
         
-        self.btn_live = QPushButton("📺", self.sidebar)
+        self.btn_live = QPushButton("\uf26c", self.sidebar)
         self.btn_live.setToolTip(_t("live_tv_tooltip"))
         self.btn_live.setObjectName("SidebarBtnActive")
         self.btn_live.setFixedSize(50, 50)
         self.btn_live.clicked.connect(lambda: self.switch_view("live"))
         layout.addWidget(self.btn_live)
         
-        self.btn_fav = QPushButton("★", self.sidebar)
+        self.btn_fav = QPushButton("\uf005", self.sidebar)
         self.btn_fav.setToolTip(_t("favorites_tooltip"))
         self.btn_fav.setObjectName("SidebarBtn")
         self.btn_fav.setFixedSize(50, 50)
         self.btn_fav.clicked.connect(lambda: self.switch_view("favorites"))
         layout.addWidget(self.btn_fav)
         
-        self.btn_history = QPushButton("📜", self.sidebar)
+        self.btn_history = QPushButton("\uf1da", self.sidebar)
         self.btn_history.setToolTip(_t("history_tooltip"))
         self.btn_history.setObjectName("SidebarBtn")
         self.btn_history.setFixedSize(50, 50)
@@ -2692,21 +2736,21 @@ class K20IPTVPlayer(QMainWindow):
         
         layout.addStretch()
         
-        self.btn_open = QPushButton("📂", self.sidebar)
+        self.btn_open = QPushButton("\uf07c", self.sidebar)
         self.btn_open.setToolTip(_t("playlist_manager_tooltip"))
         self.btn_open.setObjectName("SidebarBtn")
         self.btn_open.setFixedSize(50, 50)
         self.btn_open.clicked.connect(self.open_playlist_manager)
         layout.addWidget(self.btn_open)
         
-        self.btn_help = QPushButton("❓", self.sidebar)
+        self.btn_help = QPushButton("\uf059", self.sidebar)
         self.btn_help.setToolTip(_t("shortcuts_tooltip"))
         self.btn_help.setObjectName("SidebarBtn")
         self.btn_help.setFixedSize(50, 50)
         self.btn_help.clicked.connect(self.toggle_shortcuts_hud)
         layout.addWidget(self.btn_help)
         
-        self.btn_settings = QPushButton("⚙", self.sidebar)
+        self.btn_settings = QPushButton("\uf013", self.sidebar)
         self.btn_settings.setToolTip(_t("settings_tooltip"))
         self.btn_settings.setObjectName("SidebarBtn")
         self.btn_settings.setFixedSize(50, 50)
@@ -2939,29 +2983,29 @@ class K20IPTVPlayer(QMainWindow):
             return b
         
         # Play/Pause
-        self.btn_play = _glass_btn("▶", 40, "GlassBtnPrimary")
+        self.btn_play = _glass_btn("\uf04b", 40, "GlassBtnPrimary")
         self.btn_play.clicked.connect(self.toggle_play)
         controls_layout.addWidget(self.btn_play)
         
         # Seek Back 5s
-        self.btn_seek_back = _glass_btn("⏪", 36)
+        self.btn_seek_back = _glass_btn("\uf04a", 36)
         self.btn_seek_back.setToolTip(_t("seek_back_tooltip"))
         self.btn_seek_back.clicked.connect(self.seek_backward_5s)
         controls_layout.addWidget(self.btn_seek_back)
         
         # Seek Forward 5s
-        self.btn_seek_forward = _glass_btn("⏩", 36)
+        self.btn_seek_forward = _glass_btn("\uf04e", 36)
         self.btn_seek_forward.setToolTip(_t("seek_forward_tooltip"))
         self.btn_seek_forward.clicked.connect(self.seek_forward_5s)
         controls_layout.addWidget(self.btn_seek_forward)
         
         # Stop
-        self.btn_stop = _glass_btn("■", 36)
+        self.btn_stop = _glass_btn("\uf04d", 36)
         self.btn_stop.clicked.connect(self.stop_play)
         controls_layout.addWidget(self.btn_stop)
         
         # Volume
-        self.btn_volume = _glass_btn("🔊", 34)
+        self.btn_volume = _glass_btn("\uf028", 34)
         self.btn_volume.clicked.connect(self.toggle_mute)
         controls_layout.addWidget(self.btn_volume)
         
@@ -2984,7 +3028,7 @@ class K20IPTVPlayer(QMainWindow):
         controls_layout.addWidget(self.view_combo)
         
         # Audio tracks
-        self.btn_audio = _glass_btn("🎵", 34)
+        self.btn_audio = _glass_btn("\uf001", 34)
         self.btn_audio.setToolTip(_t("audio_tooltip"))
         self.audio_menu = QMenu(self)
         self.btn_audio.setMenu(self.audio_menu)
@@ -2992,7 +3036,7 @@ class K20IPTVPlayer(QMainWindow):
         controls_layout.addWidget(self.btn_audio)
         
         # Subtitles
-        self.btn_subs = _glass_btn("💬", 34)
+        self.btn_subs = _glass_btn("\uf075", 34)
         self.btn_subs.setToolTip(_t("subs_tooltip"))
         self.subs_menu = QMenu(self)
         self.btn_subs.setMenu(self.subs_menu)
@@ -3020,19 +3064,19 @@ class K20IPTVPlayer(QMainWindow):
         controls_layout.addWidget(self.btn_hwdec)
         
         # Screenshot button
-        self.btn_screenshot = _glass_btn("📸", 34)
+        self.btn_screenshot = _glass_btn("\uf030", 34)
         self.btn_screenshot.setToolTip(_t("screenshot_tooltip"))
         self.btn_screenshot.clicked.connect(self.take_active_player_screenshot)
         controls_layout.addWidget(self.btn_screenshot)
         
         # Stats info button
-        self.btn_stats = _glass_btn("📊", 34)
+        self.btn_stats = _glass_btn("\uf080", 34)
         self.btn_stats.setToolTip(_t("stats_tooltip"))
         self.btn_stats.clicked.connect(self.toggle_active_player_stats)
         controls_layout.addWidget(self.btn_stats)
         
         # Fullscreen
-        self.btn_fullscreen = _glass_btn("⛶", 38, "GlassBtnPrimary")
+        self.btn_fullscreen = _glass_btn("\uf065", 38, "GlassBtnPrimary")
         self.btn_fullscreen.clicked.connect(self.toggle_fullscreen)
         controls_layout.addWidget(self.btn_fullscreen)
 
@@ -3195,7 +3239,7 @@ class K20IPTVPlayer(QMainWindow):
                 pass
                 
         for i, frame in enumerate(self.player_frames):
-            frame.set_active(i == idx)
+            frame.set_active(i == idx and self.num_screens > 1)
             # Route audio to the active screen, mute all other screens
             if MPV_AVAILABLE and frame.mpv_widget and frame.mpv_widget.player:
                 try:
@@ -3493,7 +3537,7 @@ class K20IPTVPlayer(QMainWindow):
             if MPV_AVAILABLE:
                 active_frame = self.player_frames[self.active_player_idx]
                 active_frame.mpv_widget.play(stream_url)
-                self.btn_play.setText("⏸")
+                self.btn_play.setText("\uf04c")
                 
                 # Show and raise glass controls above mpv native surface after play starts
                 QTimer.singleShot(150, self._reposition_glass_controls)
@@ -3823,14 +3867,14 @@ class K20IPTVPlayer(QMainWindow):
     def on_player_pause_changed(self, is_paused):
         # Reflect status of screen 0
         if self.active_player_idx == 0:
-            self.btn_play.setText("▶" if is_paused else "⏸")
+            self.btn_play.setText("\uf04b" if is_paused else "\uf04c")
 
     def on_player_volume_changed(self, volume):
         if self.active_player_idx == 0:
             self.volume_slider.blockSignals(True)
             self.volume_slider.setValue(volume)
             self.volume_slider.blockSignals(False)
-            self.btn_volume.setText("🔇" if volume == 0 else "🔊")
+            self.btn_volume.setText("\uf026" if volume == 0 else "\uf028")
 
     def on_player_file_loaded(self):
         # Reposition and show controls bar to ensure it is visible and on top of rendering video
@@ -3847,13 +3891,13 @@ class K20IPTVPlayer(QMainWindow):
             # Update Play/Pause button symbol based on state
             if active_player.player:
                 is_p = active_player.player.pause
-                self.btn_play.setText("▶" if not is_p else "⏸")
+                self.btn_play.setText("\uf04b" if not is_p else "\uf04c")
 
     def stop_play(self):
         if MPV_AVAILABLE:
             active_player = self.player_frames[self.active_player_idx].mpv_widget
             active_player.stop()
-            self.btn_play.setText("▶")
+            self.btn_play.setText("\uf04b")
             self.lbl_channel_title.setText(_t("player_stopped").format(self.active_player_idx + 1))
             self.lbl_epg_now.setText("")
             self.epg_list.clear()
@@ -3861,7 +3905,7 @@ class K20IPTVPlayer(QMainWindow):
     def toggle_mute(self):
         if MPV_AVAILABLE:
             self.is_app_muted = not self.is_app_muted
-            self.btn_volume.setText("🔇" if self.is_app_muted else "🔊")
+            self.btn_volume.setText("\uf026" if self.is_app_muted else "\uf028")
             
             # Apply mute state to all player frames
             for i, frame in enumerate(self.player_frames):
@@ -4069,8 +4113,8 @@ class K20IPTVPlayer(QMainWindow):
             self.controls_bar.setGeometry(x, y, bar_w, bar_h)
             self.controls_bar.setStyleSheet("""
                 QFrame#GlassControls {
-                    background: rgba(15, 15, 20, 0.95);
-                    border-top: 1px solid rgba(255, 255, 255, 0.08);
+                    background: transparent;
+                    border: none;
                     border-radius: 0px;
                 }
             """)
@@ -4080,8 +4124,8 @@ class K20IPTVPlayer(QMainWindow):
             self.controls_bar.setGeometry(x, y, bar_w, bar_h)
             self.controls_bar.setStyleSheet("""
                 QFrame#GlassControls {
-                    background: rgba(15, 15, 20, 0.85);
-                    border: 1px solid rgba(255, 255, 255, 0.08);
+                    background: transparent;
+                    border: none;
                     border-radius: 16px;
                 }
             """)
@@ -4127,7 +4171,7 @@ class K20IPTVPlayer(QMainWindow):
             if idx == self.active_player_idx and self.num_screens > 1:
                 shadow = QGraphicsDropShadowEffect(frame)
                 shadow.setBlurRadius(20)
-                shadow.setColor(QColor(124, 77, 255, 180))
+                shadow.setColor(QColor(0, 229, 255, 180))
                 shadow.setOffset(0, 0)
                 frame.setGraphicsEffect(shadow)
             else:
@@ -4186,7 +4230,10 @@ class K20IPTVPlayer(QMainWindow):
                 import datetime
                 now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"screenshot_{now_str}.png"
-                root_dir = os.path.dirname(os.path.abspath(__file__))
+                if getattr(sys, 'frozen', False):
+                    root_dir = os.path.dirname(sys.executable)
+                else:
+                    root_dir = os.path.dirname(os.path.abspath(__file__))
                 snapshots_dir = os.path.join(root_dir, "snapshots")
                 filepath = os.path.join(snapshots_dir, filename)
                 
@@ -4393,7 +4440,10 @@ class K20IPTVPlayer(QMainWindow):
                 clean_name = clean_name.replace(" ", "_")
                 filename = f"{clean_name}_{now_str}.ts"
                 
-                root_dir = os.path.dirname(os.path.abspath(__file__))
+                if getattr(sys, 'frozen', False):
+                    root_dir = os.path.dirname(sys.executable)
+                else:
+                    root_dir = os.path.dirname(os.path.abspath(__file__))
                 recordings_dir = os.path.join(root_dir, "recordings")
                 filepath = os.path.join(recordings_dir, filename)
                 
@@ -4467,7 +4517,7 @@ class K20IPTVPlayer(QMainWindow):
             vol = session.get("volume", 80)
             self.volume_slider.setValue(vol)
             self.is_app_muted = session.get("is_app_muted", False)
-            self.btn_volume.setText("🔇" if self.is_app_muted else "🔊")
+            self.btn_volume.setText("\uf026" if self.is_app_muted else "\uf028")
             
             # Restore screen count layout
             num_screens = session.get("num_screens", 1)
@@ -4504,6 +4554,16 @@ class K20IPTVPlayer(QMainWindow):
         if self.checker_thread and self.checker_thread.isRunning():
             self.checker_thread.stop()
             self.checker_thread.wait()
+            
+        # Stop playlist worker thread
+        if hasattr(self, 'playlist_worker') and self.playlist_worker and self.playlist_worker.isRunning():
+            self.playlist_worker.terminate()
+            self.playlist_worker.wait()
+
+        # Stop EPG thread
+        if hasattr(self, 'epg_thread') and self.epg_thread and self.epg_thread.isRunning():
+            self.epg_thread.terminate()
+            self.epg_thread.wait()
             
         # Ensure detached PiP frames are closed/destroyed
         for frame in self.player_frames:
@@ -4545,7 +4605,9 @@ class K20IPTVPlayer(QMainWindow):
                 border: none;
                 border-radius: 12px;
                 color: #888896;
-                font-size: 20px;
+                font-family: "Font Awesome 6 Free";
+                font-weight: 900;
+                font-size: 18px;
             }
             QPushButton#SidebarBtn:hover {
                 background-color: rgba(0, 229, 255, 0.08);
@@ -4553,11 +4615,13 @@ class K20IPTVPlayer(QMainWindow):
             }
             
             QPushButton#SidebarBtnActive {
-                background-color: rgba(124, 77, 255, 0.12);
-                border: 1px solid rgba(124, 77, 255, 0.5);
+                background-color: rgba(0, 229, 255, 0.1);
+                border: 1px solid rgba(0, 229, 255, 0.4);
                 border-radius: 12px;
-                color: #7c4dff;
-                font-size: 20px;
+                color: #00e5ff;
+                font-family: "Font Awesome 6 Free";
+                font-weight: 900;
+                font-size: 18px;
             }
             
             /* Collapsible panel buttons styling */
@@ -4717,12 +4781,12 @@ class K20IPTVPlayer(QMainWindow):
             
             /* Player selection frame borders for multi-view */
             QFrame#PlayerFrame {
-                border: 2px solid rgba(255, 255, 255, 0.05);
+                border: none;
                 border-radius: 12px;
                 background-color: #030305;
             }
             QFrame#PlayerFrame[active="true"] {
-                border: 2px solid #7c4dff;
+                border: 2px solid #00e5ff;
             }
             QFrame#PlayerFrame[fullscreen="true"] {
                 border: none;
@@ -4731,8 +4795,8 @@ class K20IPTVPlayer(QMainWindow):
             
             /* Controls Bar — removed from flow, now a glass overlay */
             QFrame#GlassControls {
-                background: rgba(15, 15, 20, 0.85);
-                border: 1px solid rgba(255, 255, 255, 0.08);
+                background: transparent;
+                border: none;
                 border-radius: 16px;
             }
             
@@ -4742,8 +4806,9 @@ class K20IPTVPlayer(QMainWindow):
                 border: none;
                 border-radius: 18px;
                 color: #121214;
+                font-family: "Font Awesome 6 Free";
+                font-weight: 900;
                 font-size: 15px;
-                font-weight: bold;
             }
             QPushButton#GlassBtnPrimary:hover {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #9575ff, stop:1 #33ecff);
@@ -4758,7 +4823,11 @@ class K20IPTVPlayer(QMainWindow):
                 border: 1px solid rgba(255, 255, 255, 0.08);
                 border-radius: 17px;
                 color: #e2e8f0;
-                font-size: 15px;
+                font-family: "Font Awesome 6 Free";
+                font-weight: 900;
+                font-size: 14px;
+                padding-left: 0px;
+                padding-right: 0px;
             }
             QPushButton#GlassBtn:hover {
                 background: rgba(255, 255, 255, 0.12);
@@ -4766,12 +4835,17 @@ class K20IPTVPlayer(QMainWindow):
                 color: #00e5ff;
             }
             QPushButton#GlassBtn:pressed {
-                background: rgba(124, 77, 255, 0.4);
+                background: rgba(0, 229, 255, 0.3);
             }
             QPushButton#GlassBtn:checked {
-                background: rgba(124, 77, 255, 0.3);
-                border-color: #7c4dff;
-                color: #ffffff;
+                background: rgba(0, 229, 255, 0.15);
+                border-color: #00e5ff;
+                color: #00e5ff;
+            }
+            QPushButton#GlassBtn::menu-indicator {
+                image: none;
+                width: 0px;
+                height: 0px;
             }
             
             /* HW chip badge */

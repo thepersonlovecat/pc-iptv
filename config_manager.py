@@ -1,7 +1,12 @@
 import os
 import json
+import sys
 
-script_dir = os.path.dirname(os.path.abspath(__file__))
+if getattr(sys, 'frozen', False):
+    script_dir = os.path.dirname(sys.executable)
+else:
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+
 CONFIG_FILE = os.path.join(script_dir, "config.json")
 
 DEFAULT_CONFIG = {
