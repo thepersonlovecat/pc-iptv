@@ -1,0 +1,35 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.dll
+
+# Virtual environment files
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# User configurations (contains sensitive playlist links and credentials)
+config.json
+
+# Local caches
+epg_cache/
+logo_cache/
+snapshots/
+
+# Local logs and output files
+*.log
+*.txt
+!README.md
+
+# IDE Settings
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?

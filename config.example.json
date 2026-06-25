@@ -1,0 +1,41 @@
+{
+    "playlists": [
+        {
+            "name": "My Local Playlist",
+            "url": "playlist.m3u",
+            "is_local": true
+        },
+        {
+            "name": "My M3U URL",
+            "url": "http://example.com/playlist.m3u",
+            "is_local": false
+        },
+        {
+            "name": "My Xtream Server",
+            "url": "http://your-server.com:8080/get.php?username=YOUR_USER&password=YOUR_PASS&output=ts",
+            "is_local": false,
+            "xtream": {
+                "host": "http://your-server.com:8080",
+                "username": "YOUR_USER",
+                "password": "YOUR_PASS"
+            },
+            "epg_url": "http://your-server.com:8080/xmltv.php?username=YOUR_USER&password=YOUR_PASS"
+        }
+    ],
+    "favorites": [],
+    "history": [],
+    "active_playlist_url": "playlist.m3u",
+    "buffer_size_preset": 2,
+    "buffer_size_bytes": 52428800,
+    "last_session": {
+        "num_screens": 1,
+        "active_player_idx": 0,
+        "active_res_filter": "all",
+        "sort_mode": "default",
+        "volume": 80,
+        "is_app_muted": false,
+        "active_channels": []
+    },
+    "hwdec_enabled": true,
+    "language": "vi"
+}
