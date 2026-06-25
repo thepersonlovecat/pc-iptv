@@ -106,6 +106,7 @@ TRANSLATIONS = {
         "seek_back_tooltip": "Lùi lại 5 giây (Left Arrow)",
         "seek_forward_tooltip": "Tiến tới 5 giây (Right Arrow)",
         "view_1_screen": "▣  1 Màn hình",
+        "view_2_screens": "⬛  2 Màn hình",
         "view_4_screens": "⊞  4 Màn hình",
         "audio_tooltip": "Chọn luồng âm thanh",
         "subs_tooltip": "Chọn phụ đề",
@@ -245,6 +246,7 @@ TRANSLATIONS = {
         "seek_back_tooltip": "Rewind 5s (Left Arrow)",
         "seek_forward_tooltip": "Fast Forward 5s (Right Arrow)",
         "view_1_screen": "▣  1 Screen",
+        "view_2_screens": "⬛  2 Screens",
         "view_4_screens": "⊞  4 Screens",
         "audio_tooltip": "Select Audio Stream",
         "subs_tooltip": "Select Subtitles",
@@ -384,6 +386,7 @@ TRANSLATIONS = {
         "seek_back_tooltip": "快退 5 秒 (左方向键)",
         "seek_forward_tooltip": "快进 5 秒 (右方向键)",
         "view_1_screen": "▣  单画面",
+        "view_2_screens": "⬛  双画面",
         "view_4_screens": "⊞  四画面",
         "audio_tooltip": "选择音频流",
         "subs_tooltip": "选择字幕",
@@ -2584,7 +2587,7 @@ class K20IPTVPlayer(QMainWindow):
             self.view_combo.blockSignals(True)
             current_view_idx = self.view_combo.currentIndex()
             self.view_combo.clear()
-            self.view_combo.addItems([_t("view_1_screen"), _t("view_4_screens")])
+            self.view_combo.addItems([_t("view_1_screen"), _t("view_2_screens"), _t("view_4_screens")])
             if current_view_idx >= 0 and current_view_idx < self.view_combo.count():
                 self.view_combo.setCurrentIndex(current_view_idx)
             self.view_combo.blockSignals(False)
@@ -2975,9 +2978,9 @@ class K20IPTVPlayer(QMainWindow):
         # Multi-view
         self.view_combo = QComboBox(self.controls_bar)
         self.view_combo.setObjectName("GlassCombo")
-        self.view_combo.addItems([_t("view_1_screen"), _t("view_4_screens")])
+        self.view_combo.addItems([_t("view_1_screen"), _t("view_2_screens"), _t("view_4_screens")])
         self.view_combo.currentIndexChanged.connect(self.on_multiview_changed)
-        self.view_combo.setFixedWidth(140)
+        self.view_combo.setFixedWidth(150)
         controls_layout.addWidget(self.view_combo)
         
         # Audio tracks
@@ -3134,6 +3137,21 @@ class K20IPTVPlayer(QMainWindow):
             self.grid_layout.setRowStretch(0, 1)
             # Hide other screens and stop their playbacks/overlays to prevent background traffic & ghost rendering
             for i in range(1, 4):
+                self.player_frames[i].overlay.hide()
+                if self.player_frames[i].mpv_widget:
+                    self.player_frames[i].mpv_widget.stop()
+                self.player_frames[i].hide()
+        elif self.num_screens == 2:
+            # 1x2 side-by-side layout
+            for i in range(2):
+                frame = self.player_frames[i]
+                self.grid_layout.addWidget(frame, 0, i)
+                frame.show()
+            self.grid_layout.setColumnStretch(0, 1)
+            self.grid_layout.setColumnStretch(1, 1)
+            self.grid_layout.setRowStretch(0, 1)
+            # Hide screens 2 & 3 and stop their streams
+            for i in range(2, 4):
                 self.player_frames[i].overlay.hide()
                 if self.player_frames[i].mpv_widget:
                     self.player_frames[i].mpv_widget.stop()
@@ -3881,13 +3899,17 @@ class K20IPTVPlayer(QMainWindow):
             active_player.toggle_hwdec(checked)
             self.btn_hwdec.setText("HW: On" if checked else "HW: Off")
 
-    def on_multiview_changed(self, text):
-        if "4 Màn hình" in text:
+    def on_multiview_changed(self, index):
+        if index == 2:
             self.num_screens = 4
+        elif index == 1:
+            self.num_screens = 2
+            if self.active_player_idx > 1:
+                self.select_active_screen(0)
         else:
             self.num_screens = 1
             self.select_active_screen(0)
-            
+
         self.draw_layout()
 
     def toggle_fullscreen(self):
@@ -4452,7 +4474,12 @@ class K20IPTVPlayer(QMainWindow):
             self.num_screens = num_screens
             if hasattr(self, 'view_combo'):
                 self.view_combo.blockSignals(True)
-                self.view_combo.setCurrentIndex(0 if num_screens == 1 else 1)
+                if num_screens == 4:
+                    self.view_combo.setCurrentIndex(2)
+                elif num_screens == 2:
+                    self.view_combo.setCurrentIndex(1)
+                else:
+                    self.view_combo.setCurrentIndex(0)
                 self.view_combo.blockSignals(False)
             self.draw_layout()
             
