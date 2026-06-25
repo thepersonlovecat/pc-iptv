@@ -2002,17 +2002,17 @@ class PlaylistManagerDialog(QDialog):
         actions_title.setStyleSheet("color: #7c4dff;")
         right_col.addWidget(actions_title)
         
-        self.btn_add_local = QPushButton("📂  " + _t("btn_add_file"), self)
+        self.btn_add_local = QPushButton(_t("btn_add_file"), self)
         self.btn_add_local.setObjectName("PlaylistActionBtn")
         self.btn_add_local.clicked.connect(self.add_local_playlist)
         right_col.addWidget(self.btn_add_local)
         
-        self.btn_add_url = QPushButton("🌐  " + _t("btn_add_url"), self)
+        self.btn_add_url = QPushButton(_t("btn_add_url"), self)
         self.btn_add_url.setObjectName("PlaylistActionBtn")
         self.btn_add_url.clicked.connect(self.add_url_playlist)
         right_col.addWidget(self.btn_add_url)
         
-        self.btn_add_xtream = QPushButton("⚡  " + _t("btn_add_xtream"), self)
+        self.btn_add_xtream = QPushButton(_t("btn_add_xtream"), self)
         self.btn_add_xtream.setObjectName("PlaylistActionBtn")
         self.btn_add_xtream.clicked.connect(self.add_xtream_playlist)
         right_col.addWidget(self.btn_add_xtream)
@@ -2024,12 +2024,12 @@ class PlaylistManagerDialog(QDialog):
         sep.setStyleSheet("background-color: #282830; max-height: 1px;")
         right_col.addWidget(sep)
         
-        self.btn_edit = QPushButton("✏️  " + _t("btn_edit"), self)
+        self.btn_edit = QPushButton(_t("btn_edit"), self)
         self.btn_edit.setObjectName("PlaylistActionBtn")
         self.btn_edit.clicked.connect(self.edit_playlist)
         right_col.addWidget(self.btn_edit)
         
-        self.btn_delete = QPushButton("🗑️  " + _t("btn_delete"), self)
+        self.btn_delete = QPushButton(_t("btn_delete"), self)
         self.btn_delete.setObjectName("PlaylistDeleteBtn")
         self.btn_delete.clicked.connect(self.delete_playlist)
         right_col.addWidget(self.btn_delete)
@@ -2087,26 +2087,44 @@ class PlaylistManagerDialog(QDialog):
             name = os.path.basename(file_path)
             dialog = QDialog(self)
             dialog.setWindowTitle(_t("btn_add_file"))
-            dialog.resize(400, 180)
+            dialog.resize(550, 320)
             dialog.setStyleSheet(self.styleSheet())
             
-            d_layout = QFormLayout(dialog)
+            d_layout = QVBoxLayout(dialog)
+            d_layout.setContentsMargins(20, 20, 20, 20)
+            d_layout.setSpacing(10)
+            
+            # Display Name
+            lbl_name = QLabel(_t("label_playlist_name"), dialog)
+            lbl_name.setFont(QFont("Outfit", 9, QFont.Bold))
             name_input = QLineEdit(dialog)
             name_input.setText(name)
+            d_layout.addWidget(lbl_name)
+            d_layout.addWidget(name_input)
+            
+            # File Path
+            lbl_path = QLabel(_t("label_file_path"), dialog)
+            lbl_path.setFont(QFont("Outfit", 9, QFont.Bold))
             path_input = QLineEdit(dialog)
             path_input.setText(file_path)
             path_input.setReadOnly(True)
+            d_layout.addWidget(lbl_path)
+            d_layout.addWidget(path_input)
+            
+            # EPG URL
+            lbl_epg = QLabel(_t("label_epg_url"), dialog)
+            lbl_epg.setFont(QFont("Outfit", 9, QFont.Bold))
             epg_input = QLineEdit(dialog)
             epg_input.setPlaceholderText("http://example.com/epg.xml")
+            d_layout.addWidget(lbl_epg)
+            d_layout.addWidget(epg_input)
             
-            d_layout.addRow(_t("label_playlist_name"), name_input)
-            d_layout.addRow(_t("label_file_path"), path_input)
-            d_layout.addRow(_t("label_epg_url"), epg_input)
+            d_layout.addSpacing(10)
             
             bbox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
             bbox.accepted.connect(dialog.accept)
             bbox.rejected.connect(dialog.reject)
-            d_layout.addRow(bbox)
+            d_layout.addWidget(bbox)
             
             if dialog.exec() == QDialog.Accepted:
                 name = name_input.text().strip()
@@ -2126,25 +2144,43 @@ class PlaylistManagerDialog(QDialog):
     def add_url_playlist(self):
         dialog = QDialog(self)
         dialog.setWindowTitle(_t("add_url_title"))
-        dialog.resize(400, 180)
+        dialog.resize(550, 320)
         dialog.setStyleSheet(self.styleSheet())
         
-        d_layout = QFormLayout(dialog)
+        d_layout = QVBoxLayout(dialog)
+        d_layout.setContentsMargins(20, 20, 20, 20)
+        d_layout.setSpacing(10)
+        
+        # Name
+        lbl_name = QLabel(_t("label_playlist_name"), dialog)
+        lbl_name.setFont(QFont("Outfit", 9, QFont.Bold))
         name_input = QLineEdit(dialog)
         name_input.setPlaceholderText(_t("placeholder_playlist_name"))
+        d_layout.addWidget(lbl_name)
+        d_layout.addWidget(name_input)
+        
+        # URL
+        lbl_url = QLabel(_t("label_url_path"), dialog)
+        lbl_url.setFont(QFont("Outfit", 9, QFont.Bold))
         url_input = QLineEdit(dialog)
         url_input.setPlaceholderText("http://example.com/playlist.m3u")
+        d_layout.addWidget(lbl_url)
+        d_layout.addWidget(url_input)
+        
+        # EPG
+        lbl_epg = QLabel(_t("label_epg_url"), dialog)
+        lbl_epg.setFont(QFont("Outfit", 9, QFont.Bold))
         epg_input = QLineEdit(dialog)
         epg_input.setPlaceholderText("http://example.com/epg.xml")
+        d_layout.addWidget(lbl_epg)
+        d_layout.addWidget(epg_input)
         
-        d_layout.addRow(_t("label_playlist_name"), name_input)
-        d_layout.addRow(_t("label_url_path"), url_input)
-        d_layout.addRow(_t("label_epg_url"), epg_input)
+        d_layout.addSpacing(10)
         
         bbox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
         bbox.accepted.connect(dialog.accept)
         bbox.rejected.connect(dialog.reject)
-        d_layout.addRow(bbox)
+        d_layout.addWidget(bbox)
         
         if dialog.exec() == QDialog.Accepted:
             name = name_input.text().strip()
@@ -2160,33 +2196,64 @@ class PlaylistManagerDialog(QDialog):
                     return
                 self.config["playlists"].append(new_pl)
                 config_manager.save_config(self.config)
-                self.populate_list() 
+                self.populate_list()
+
     def add_xtream_playlist(self):
         dialog = QDialog(self)
         dialog.setWindowTitle(_t("add_xtream_title"))
-        dialog.resize(420, 220)
+        dialog.resize(550, 360)
         dialog.setStyleSheet(self.styleSheet())
         
-        d_layout = QFormLayout(dialog)
+        d_layout = QVBoxLayout(dialog)
+        d_layout.setContentsMargins(20, 20, 20, 20)
+        d_layout.setSpacing(8)
+        
+        # Name
+        lbl_name = QLabel(_t("label_display_name"), dialog)
+        lbl_name.setFont(QFont("Outfit", 9, QFont.Bold))
         name_input = QLineEdit(dialog)
         name_input.setPlaceholderText(_t("placeholder_xtream_name"))
+        d_layout.addWidget(lbl_name)
+        d_layout.addWidget(name_input)
+        
+        # Host URL
+        lbl_host = QLabel(_t("label_server_url"), dialog)
+        lbl_host.setFont(QFont("Outfit", 9, QFont.Bold))
         host_input = QLineEdit(dialog)
         host_input.setPlaceholderText("http://domain.com:8080")
+        d_layout.addWidget(lbl_host)
+        d_layout.addWidget(host_input)
+        
+        # Username & Password side-by-side
+        cred_layout = QHBoxLayout()
+        cred_layout.setSpacing(10)
+        
+        user_col = QVBoxLayout()
+        lbl_user = QLabel(_t("label_username"), dialog)
+        lbl_user.setFont(QFont("Outfit", 9, QFont.Bold))
         user_input = QLineEdit(dialog)
         user_input.setPlaceholderText(_t("placeholder_username"))
+        user_col.addWidget(lbl_user)
+        user_col.addWidget(user_input)
+        cred_layout.addLayout(user_col)
+        
+        pass_col = QVBoxLayout()
+        lbl_pass = QLabel(_t("label_password"), dialog)
+        lbl_pass.setFont(QFont("Outfit", 9, QFont.Bold))
         pass_input = QLineEdit(dialog)
         pass_input.setPlaceholderText(_t("placeholder_password"))
         pass_input.setEchoMode(QLineEdit.Password)
+        pass_col.addWidget(lbl_pass)
+        pass_col.addWidget(pass_input)
+        cred_layout.addLayout(pass_col)
         
-        d_layout.addRow(_t("label_display_name"), name_input)
-        d_layout.addRow(_t("label_server_url"), host_input)
-        d_layout.addRow(_t("label_username"), user_input)
-        d_layout.addRow(_t("label_password"), pass_input)
+        d_layout.addLayout(cred_layout)
+        d_layout.addSpacing(10)
         
         bbox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
         bbox.accepted.connect(dialog.accept)
         bbox.rejected.connect(dialog.reject)
-        d_layout.addRow(bbox)
+        d_layout.addWidget(bbox)
         
         if dialog.exec() == QDialog.Accepted:
             name = name_input.text().strip()
@@ -2195,7 +2262,6 @@ class PlaylistManagerDialog(QDialog):
             pwd = pass_input.text().strip()
             
             if name and host and user and pwd:
-                # Construct URLs
                 playlist_url = f"{host.rstrip('/')}/get.php?username={user}&password={pwd}&output=ts"
                 epg_url = f"{host.rstrip('/')}/xmltv.php?username={user}&password={pwd}"
                 
@@ -2216,7 +2282,7 @@ class PlaylistManagerDialog(QDialog):
                 self.config["playlists"].append(new_pl)
                 config_manager.save_config(self.config)
                 self.populate_list()
- 
+
     def edit_playlist(self):
         current_item = self.list_widget.currentItem()
         if not current_item:
@@ -2239,31 +2305,58 @@ class PlaylistManagerDialog(QDialog):
         if pl.get("xtream"):
             dialog = QDialog(self)
             dialog.setWindowTitle(_t("edit_xtream_title"))
-            dialog.resize(420, 220)
+            dialog.resize(550, 360)
             dialog.setStyleSheet(self.styleSheet())
             
-            d_layout = QFormLayout(dialog)
+            d_layout = QVBoxLayout(dialog)
+            d_layout.setContentsMargins(20, 20, 20, 20)
+            d_layout.setSpacing(8)
+            
+            lbl_name = QLabel(_t("label_display_name"), dialog)
+            lbl_name.setFont(QFont("Outfit", 9, QFont.Bold))
             name_input = QLineEdit(dialog)
             name_input.setText(pl.get("name", ""))
+            d_layout.addWidget(lbl_name)
+            d_layout.addWidget(name_input)
             
             xtream_data = pl.get("xtream", {})
+            lbl_host = QLabel(_t("label_server_url"), dialog)
+            lbl_host.setFont(QFont("Outfit", 9, QFont.Bold))
             host_input = QLineEdit(dialog)
             host_input.setText(xtream_data.get("host", ""))
+            d_layout.addWidget(lbl_host)
+            d_layout.addWidget(host_input)
+            
+            # Credentials Row
+            cred_layout = QHBoxLayout()
+            cred_layout.setSpacing(10)
+            
+            user_col = QVBoxLayout()
+            lbl_user = QLabel(_t("label_username"), dialog)
+            lbl_user.setFont(QFont("Outfit", 9, QFont.Bold))
             user_input = QLineEdit(dialog)
             user_input.setText(xtream_data.get("username", ""))
+            user_col.addWidget(lbl_user)
+            user_col.addWidget(user_input)
+            cred_layout.addLayout(user_col)
+            
+            pass_col = QVBoxLayout()
+            lbl_pass = QLabel(_t("label_password"), dialog)
+            lbl_pass.setFont(QFont("Outfit", 9, QFont.Bold))
             pass_input = QLineEdit(dialog)
             pass_input.setText(xtream_data.get("password", ""))
             pass_input.setEchoMode(QLineEdit.Password)
+            pass_col.addWidget(lbl_pass)
+            pass_col.addWidget(pass_input)
+            cred_layout.addLayout(pass_col)
             
-            d_layout.addRow(_t("label_display_name"), name_input)
-            d_layout.addRow(_t("label_server_url"), host_input)
-            d_layout.addRow(_t("label_username"), user_input)
-            d_layout.addRow(_t("label_password"), pass_input)
+            d_layout.addLayout(cred_layout)
+            d_layout.addSpacing(10)
             
             bbox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
             bbox.accepted.connect(dialog.accept)
             bbox.rejected.connect(dialog.reject)
-            d_layout.addRow(bbox)
+            d_layout.addWidget(bbox)
             
             if dialog.exec() == QDialog.Accepted:
                 name = name_input.text().strip()
@@ -2295,26 +2388,40 @@ class PlaylistManagerDialog(QDialog):
         elif not pl.get("is_local"):
             dialog = QDialog(self)
             dialog.setWindowTitle(_t("edit_url_title"))
-            dialog.resize(400, 180)
+            dialog.resize(550, 320)
             dialog.setStyleSheet(self.styleSheet())
             
-            d_layout = QFormLayout(dialog)
+            d_layout = QVBoxLayout(dialog)
+            d_layout.setContentsMargins(20, 20, 20, 20)
+            d_layout.setSpacing(10)
+            
+            lbl_name = QLabel(_t("label_playlist_name"), dialog)
+            lbl_name.setFont(QFont("Outfit", 9, QFont.Bold))
             name_input = QLineEdit(dialog)
             name_input.setText(pl.get("name", ""))
+            d_layout.addWidget(lbl_name)
+            d_layout.addWidget(name_input)
+            
+            lbl_url = QLabel(_t("label_url_path"), dialog)
+            lbl_url.setFont(QFont("Outfit", 9, QFont.Bold))
             url_input = QLineEdit(dialog)
             url_input.setText(pl.get("url", ""))
+            d_layout.addWidget(lbl_url)
+            d_layout.addWidget(url_input)
+            
+            lbl_epg = QLabel(_t("label_epg_url"), dialog)
+            lbl_epg.setFont(QFont("Outfit", 9, QFont.Bold))
             epg_input = QLineEdit(dialog)
             epg_input.setText(pl.get("epg_url", ""))
-            epg_input.setPlaceholderText("http://example.com/epg.xml")
+            d_layout.addWidget(lbl_epg)
+            d_layout.addWidget(epg_input)
             
-            d_layout.addRow(_t("label_playlist_name"), name_input)
-            d_layout.addRow(_t("label_url_path"), url_input)
-            d_layout.addRow(_t("label_epg_url"), epg_input)
+            d_layout.addSpacing(10)
             
             bbox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
             bbox.accepted.connect(dialog.accept)
             bbox.rejected.connect(dialog.reject)
-            d_layout.addRow(bbox)
+            d_layout.addWidget(bbox)
             
             if dialog.exec() == QDialog.Accepted:
                 name = name_input.text().strip()
@@ -2336,26 +2443,40 @@ class PlaylistManagerDialog(QDialog):
         else:
             dialog = QDialog(self)
             dialog.setWindowTitle(_t("edit_local_title"))
-            dialog.resize(400, 180)
+            dialog.resize(550, 320)
             dialog.setStyleSheet(self.styleSheet())
             
-            d_layout = QFormLayout(dialog)
+            d_layout = QVBoxLayout(dialog)
+            d_layout.setContentsMargins(20, 20, 20, 20)
+            d_layout.setSpacing(10)
+            
+            lbl_name = QLabel(_t("label_display_name"), dialog)
+            lbl_name.setFont(QFont("Outfit", 9, QFont.Bold))
             name_input = QLineEdit(dialog)
             name_input.setText(pl.get("name", ""))
+            d_layout.addWidget(lbl_name)
+            d_layout.addWidget(name_input)
+            
+            lbl_path = QLabel(_t("label_file_path"), dialog)
+            lbl_path.setFont(QFont("Outfit", 9, QFont.Bold))
             path_input = QLineEdit(dialog)
             path_input.setText(pl.get("url", ""))
+            d_layout.addWidget(lbl_path)
+            d_layout.addWidget(path_input)
+            
+            lbl_epg = QLabel(_t("label_epg_url"), dialog)
+            lbl_epg.setFont(QFont("Outfit", 9, QFont.Bold))
             epg_input = QLineEdit(dialog)
             epg_input.setText(pl.get("epg_url", ""))
-            epg_input.setPlaceholderText("http://example.com/epg.xml")
+            d_layout.addWidget(lbl_epg)
+            d_layout.addWidget(epg_input)
             
-            d_layout.addRow(_t("label_display_name"), name_input)
-            d_layout.addRow(_t("label_file_path"), path_input)
-            d_layout.addRow(_t("label_epg_url"), epg_input)
+            d_layout.addSpacing(10)
             
             bbox = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dialog)
             bbox.accepted.connect(dialog.accept)
             bbox.rejected.connect(dialog.reject)
-            d_layout.addRow(bbox)
+            d_layout.addWidget(bbox)
             
             if dialog.exec() == QDialog.Accepted:
                 name = name_input.text().strip()
