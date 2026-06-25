@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QStackedWidget, QDialog, QFormLayout, QDialogButtonBox,
     QMenu, QGridLayout, QGraphicsDropShadowEffect, QCheckBox
 )
-from PySide6.QtCore import Qt, QSize, QTimer, QObject, Signal, QThread, QPropertyAnimation, QEasingCurve
+from PySide6.QtCore import Qt, QSize, QTimer, QObject, Signal, QThread, QPropertyAnimation, QEasingCurve, QEvent
 from PySide6.QtGui import QIcon, QFont, QColor, QPalette, QAction, QCursor, QKeySequence, QShortcut, QPainter, QPen
 
 # Set locale for numeric formatting as required by libmpv
@@ -502,12 +502,23 @@ def _t(key, default=""):
 load_app_language()
 
 
+def clean_search_string(s):
+    if not s:
+        return ""
+    s = s.lower()
+    s1 = 'àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ'
+    s2 = 'aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyyd'
+    trans = str.maketrans(s1, s2)
+    return s.translate(trans)
+
+
 class MpvSignals(QObject):
     pause_changed = Signal(bool)
     time_changed = Signal(float)
     duration_changed = Signal(float)
     volume_changed = Signal(int)
     file_loaded = Signal()
+    buffering_event = Signal(bool)
 
 
 # Cache/buffer sizes preset configuration
@@ -631,7 +642,7 @@ logo_manager = LogoManager()
 
 class ChannelItemWidget(QWidget):
 
-    def __init__(self, name, url, tvg_id="", is_alive=None, latency_ms=-1, logo_url="", parent=None):
+    def __init__(self, name, url, tvg_id="", is_alive=None, latency_ms=-1, logo_url="", current_program="", parent=None):
         super().__init__(parent)
         self.url = url
         self.is_alive = is_alive
@@ -669,11 +680,29 @@ class ChannelItemWidget(QWidget):
                 logo_manager.logo_downloaded.connect(self._on_global_logo_ready)
                 logo_manager.fetch_logo(logo_url)
         
+        # Text container for Name and EPG
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(2)
+        
         # Channel Name
         self.lbl_name = QLabel(name, self)
         self.lbl_name.setStyleSheet("color: #e0e0e6; font-weight: 500; background: transparent; font-size: 12px;")
         self.lbl_name.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        layout.addWidget(self.lbl_name)
+        text_layout.addWidget(self.lbl_name)
+        
+        # EPG program
+        self.lbl_epg = QLabel(self)
+        if current_program:
+            self.lbl_epg.setText(current_program)
+            self.lbl_epg.setStyleSheet("color: #00e5ff; background: transparent; font-size: 10px;")
+        else:
+            self.lbl_epg.setText("")
+            self.lbl_epg.setStyleSheet("color: #888896; background: transparent; font-size: 10px;")
+        self.lbl_epg.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        text_layout.addWidget(self.lbl_epg)
+        
+        layout.addLayout(text_layout)
         
         layout.addStretch()
         
@@ -1095,6 +1124,7 @@ class MpvWidget(QWidget):
         self.setMouseTracking(True)
         
         self.signals = MpvSignals()
+        self.signals.buffering_event.connect(self.on_buffering_state_changed)
         self.player = None
         
         self.config = config_manager.load_config()
@@ -1185,9 +1215,32 @@ class MpvWidget(QWidget):
                     if value and getattr(self, 'is_playing_state', False):
                         if self.reconnect_count < self.max_reconnects:
                             self.reconnect_timer.start(2000)
+                            
+                @self.player.property_observer('paused-for-cache')
+                def on_cache_pause_change(_self, value):
+                    if value is not None:
+                        self.signals.buffering_event.emit(bool(value))
             except Exception as e:
                 print(f"Failed to initialize MPV player: {e}")
                 self.player = None
+
+    def on_buffering_state_changed(self, is_buffering):
+        if is_buffering and self.player:
+            if not hasattr(self, 'buffering_count'):
+                self.buffering_count = 0
+            self.buffering_count += 1
+            print(f"[!] Buffering event detected! Count: {self.buffering_count}")
+            
+            if self.buffering_count >= 2:
+                try:
+                    current_bytes = self.player['demuxer-max-bytes'] or (50 * 1024 * 1024)
+                    new_bytes = min(current_bytes * 3, 500 * 1024 * 1024)
+                    self.player['demuxer-max-bytes'] = new_bytes
+                    self.player['demuxer-readahead-secs'] = 90
+                    print(f"[+] Dynamic buffering triggered: Increased demuxer-max-bytes to {new_bytes / (1024*1024)}MB")
+                    self.buffering_count = 0
+                except Exception as e:
+                    print(f"Could not dynamically adjust buffer: {e}")
 
     def show_message(self, message, duration=3000):
         if self.player:
@@ -3408,7 +3461,8 @@ class K20IPTVPlayer(QMainWindow):
                 break
 
     def filter_channels(self):
-        query = self.search_bar.text().lower()
+        query = self.search_bar.text().strip()
+        query_clean = clean_search_string(query)
         selected_cat = self.cat_selector.currentText()
         
         self.channel_list.clear()
@@ -3431,7 +3485,8 @@ class K20IPTVPlayer(QMainWindow):
             
             # Text search filter
             if query:
-                if query not in name.lower():
+                name_clean = clean_search_string(name)
+                if query_clean not in name_clean:
                     continue
                 
             # Category filter
@@ -3503,10 +3558,17 @@ class K20IPTVPlayer(QMainWindow):
             is_alive = self.channel_statuses.get(url, None)
             latency_ms = self.channel_latencies.get(url, -1)
             
-            widget = ChannelItemWidget(name, url, tvg_id, is_alive, latency_ms, logo_url)
+            # Fetch current EPG program if available
+            current_prog = ""
+            if tvg_id or name:
+                prog = epg_manager.get_current_program(tvg_id, name)
+                if prog:
+                    current_prog = prog.get("title", "")
+            
+            widget = ChannelItemWidget(name, url, tvg_id, is_alive, latency_ms, logo_url, current_prog)
             
             item = QListWidgetItem()
-            item.setSizeHint(QSize(0, 54))
+            item.setSizeHint(QSize(0, 58))
             self.channel_list.addItem(item)
             self.channel_list.setItemWidget(item, widget)
             
@@ -4571,6 +4633,30 @@ class K20IPTVPlayer(QMainWindow):
                 frame.close()
                 
         super().closeEvent(event)
+
+    def changeEvent(self, event):
+        if event.type() == QEvent.WindowStateChange:
+            if self.isMinimized():
+                print("[*] Window minimized. Pausing all active players to save resources...")
+                for frame in self.player_frames:
+                    if frame.mpv_widget and frame.mpv_widget.player:
+                        try:
+                            if not frame.mpv_widget.player.pause:
+                                frame.mpv_widget.player.pause = True
+                                frame._auto_paused = True
+                        except Exception:
+                            pass
+            else:
+                print("[*] Window restored. Resuming players that were auto-paused...")
+                for frame in self.player_frames:
+                    if frame.mpv_widget and frame.mpv_widget.player:
+                        try:
+                            if getattr(frame, '_auto_paused', False):
+                                frame.mpv_widget.player.pause = False
+                                frame._auto_paused = False
+                        except Exception:
+                            pass
+        super().changeEvent(event)
 
     # Stylesheet application (Premium Dark Glassmorphism)
     def apply_theme(self):
