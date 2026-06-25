@@ -1850,6 +1850,85 @@ class ChannelChecker(QThread):
         self.running = False
 
 
+class PlaylistItemWidget(QWidget):
+    def __init__(self, pl, is_active, parent=None):
+        super().__init__(parent)
+        self.setObjectName("PlaylistItemWidget")
+        
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setSpacing(12)
+        
+        # Icon Label
+        self.icon_label = QLabel(self)
+        self.icon_label.setFont(QFont("Font Awesome 6 Free", 14))
+        self.icon_label.setFixedWidth(24)
+        self.icon_label.setAlignment(Qt.AlignCenter)
+        
+        xtream = pl.get("xtream")
+        is_local = pl.get("is_local")
+        
+        if xtream:
+            self.icon_label.setText("\uf1e6") # Plug icon
+            self.icon_label.setStyleSheet("color: #00e676; background: transparent;") # Neon green
+            pl_type = _t("pl_type_xtream")
+            badge_color = "#1b5e20"
+        elif is_local:
+            self.icon_label.setText("\uf07b") # Folder icon
+            self.icon_label.setStyleSheet("color: #29b6f6; background: transparent;") # Light blue
+            pl_type = _t("pl_type_local")
+            badge_color = "#01579b"
+        else:
+            self.icon_label.setText("\uf0c1") # Link icon
+            self.icon_label.setStyleSheet("color: #ab47bc; background: transparent;") # Purple
+            pl_type = _t("pl_type_url")
+            badge_color = "#4a148c"
+            
+        layout.addWidget(self.icon_label)
+        
+        # Details container
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(2)
+        
+        self.name_label = QLabel(pl.get("name", ""), self)
+        self.name_label.setFont(QFont("Outfit", 10, QFont.Bold))
+        self.name_label.setStyleSheet("color: #ffffff; background: transparent;")
+        text_layout.addWidget(self.name_label)
+        
+        url_text = pl.get("url", "")
+        # Hide sensitive passwords in url for Xtream / urls
+        import re
+        if "password=" in url_text:
+            url_text = re.sub(r'password=[^&]+', 'password=******', url_text)
+            
+        self.url_label = QLabel(url_text, self)
+        self.url_label.setFont(QFont("Outfit", 8))
+        self.url_label.setStyleSheet("color: #888899; background: transparent;")
+        
+        # Truncate
+        from PySide6.QtGui import QFontMetrics
+        metrics = QFontMetrics(self.url_label.font())
+        elided = metrics.elidedText(url_text, Qt.ElideRight, 260)
+        self.url_label.setText(elided)
+        text_layout.addWidget(self.url_label)
+        
+        layout.addLayout(text_layout)
+        layout.addStretch()
+        
+        # Type Badge
+        self.badge = QLabel(pl_type, self)
+        self.badge.setFont(QFont("Outfit", 8, QFont.Bold))
+        self.badge.setStyleSheet(f"background-color: {badge_color}; color: #ffffff; padding: 2px 8px; border-radius: 4px;")
+        self.badge.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.badge)
+        
+        # Active Checkmark/Star Icon
+        if is_active:
+            self.active_label = QLabel("⭐", self)
+            self.active_label.setFont(QFont("Outfit", 10))
+            self.active_label.setStyleSheet("background: transparent;")
+            layout.addWidget(self.active_label)
+
 # Playlist Management Dialog
 class PlaylistManagerDialog(QDialog):
     playlist_changed = Signal()
@@ -1857,76 +1936,145 @@ class PlaylistManagerDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle(_t("playlist_manager_title"))
-        self.resize(500, 350)
         self.config = config_manager.load_config()
         self.setup_ui()
         self.apply_theme()
 
     def setup_ui(self):
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(15, 15, 15, 15)
+        self.resize(750, 480)
         
-        lbl = QLabel(_t("playlist_list_label"), self)
-        lbl.setFont(QFont("Outfit", 12, QFont.Bold))
-        layout.addWidget(lbl)
+        # Main layout
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        main_layout.setSpacing(15)
+        
+        # Header Info
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(10)
+        
+        icon_lbl = QLabel("📂", self)
+        icon_lbl.setFont(QFont("Outfit", 18))
+        header_layout.addWidget(icon_lbl)
+        
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
+        
+        title_lbl = QLabel(_t("playlist_manager_title"), self)
+        title_lbl.setFont(QFont("Outfit", 14, QFont.Bold))
+        title_lbl.setStyleSheet("color: #ffffff;")
+        title_col.addWidget(title_lbl)
+        
+        sub_lbl = QLabel("Quản lý danh sách kênh IPTV và nguồn phát của bạn.", self)
+        sub_lbl.setFont(QFont("Outfit", 9))
+        sub_lbl.setStyleSheet("color: #888899;")
+        title_col.addWidget(sub_lbl)
+        
+        header_layout.addLayout(title_col)
+        header_layout.addStretch()
+        main_layout.addLayout(header_layout)
+        
+        # Splitter or horizontal layout for split view
+        content_layout = QHBoxLayout()
+        content_layout.setSpacing(20)
+        
+        # Left side column: Search + List
+        left_col = QVBoxLayout()
+        left_col.setSpacing(10)
+        
+        self.search_bar = QLineEdit(self)
+        self.search_bar.setPlaceholderText("🔍 Tìm kiếm playlist...")
+        self.search_bar.setObjectName("PlaylistSearch")
+        self.search_bar.textChanged.connect(self.populate_list)
+        left_col.addWidget(self.search_bar)
         
         self.list_widget = QListWidget(self)
         self.list_widget.setObjectName("PlaylistList")
-        layout.addWidget(self.list_widget)
+        left_col.addWidget(self.list_widget)
         
-        btn_layout = QHBoxLayout()
+        content_layout.addLayout(left_col, 3) # Take 3/4 space
         
-        self.btn_add_local = QPushButton(_t("btn_add_file"), self)
+        # Right side column: Actions panel
+        right_col = QVBoxLayout()
+        right_col.setSpacing(10)
+        
+        actions_title = QLabel("Thao tác", self)
+        actions_title.setFont(QFont("Outfit", 10, QFont.Bold))
+        actions_title.setStyleSheet("color: #7c4dff;")
+        right_col.addWidget(actions_title)
+        
+        self.btn_add_local = QPushButton("📂  " + _t("btn_add_file"), self)
+        self.btn_add_local.setObjectName("PlaylistActionBtn")
         self.btn_add_local.clicked.connect(self.add_local_playlist)
-        btn_layout.addWidget(self.btn_add_local)
+        right_col.addWidget(self.btn_add_local)
         
-        self.btn_add_url = QPushButton(_t("btn_add_url"), self)
+        self.btn_add_url = QPushButton("🌐  " + _t("btn_add_url"), self)
+        self.btn_add_url.setObjectName("PlaylistActionBtn")
         self.btn_add_url.clicked.connect(self.add_url_playlist)
-        btn_layout.addWidget(self.btn_add_url)
+        right_col.addWidget(self.btn_add_url)
         
-        self.btn_add_xtream = QPushButton(_t("btn_add_xtream"), self)
+        self.btn_add_xtream = QPushButton("⚡  " + _t("btn_add_xtream"), self)
+        self.btn_add_xtream.setObjectName("PlaylistActionBtn")
         self.btn_add_xtream.clicked.connect(self.add_xtream_playlist)
-        btn_layout.addWidget(self.btn_add_xtream)
+        right_col.addWidget(self.btn_add_xtream)
         
-        self.btn_edit = QPushButton(_t("btn_edit"), self)
+        # Horizontal line separator
+        sep = QFrame(self)
+        sep.setFrameShape(QFrame.HLine)
+        sep.setFrameShadow(QFrame.Sunken)
+        sep.setStyleSheet("background-color: #282830; max-height: 1px;")
+        right_col.addWidget(sep)
+        
+        self.btn_edit = QPushButton("✏️  " + _t("btn_edit"), self)
+        self.btn_edit.setObjectName("PlaylistActionBtn")
         self.btn_edit.clicked.connect(self.edit_playlist)
-        btn_layout.addWidget(self.btn_edit)
+        right_col.addWidget(self.btn_edit)
         
-        self.btn_delete = QPushButton(_t("btn_delete"), self)
+        self.btn_delete = QPushButton("🗑️  " + _t("btn_delete"), self)
+        self.btn_delete.setObjectName("PlaylistDeleteBtn")
         self.btn_delete.clicked.connect(self.delete_playlist)
-        btn_layout.addWidget(self.btn_delete)
+        right_col.addWidget(self.btn_delete)
         
-        layout.addLayout(btn_layout)
+        right_col.addStretch()
+        content_layout.addLayout(right_col, 1) # Take 1/4 space
+        
+        main_layout.addLayout(content_layout)
+        
+        # Bottom controls
+        bottom_layout = QHBoxLayout()
+        bottom_layout.addStretch()
         
         self.button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, self)
         self.button_box.accepted.connect(self.accept_selection)
         self.button_box.rejected.connect(self.reject)
-        layout.addWidget(self.button_box)
+        bottom_layout.addWidget(self.button_box)
+        
+        main_layout.addLayout(bottom_layout)
         
         self.populate_list()
 
     def populate_list(self):
         self.list_widget.clear()
         active_url = self.config.get("active_playlist_url", "")
+        search_query = self.search_bar.text().strip().lower()
         
         for pl in self.config.get("playlists", []):
             name = pl.get("name", "")
             url = pl.get("url", "")
+            
+            # Simple text filter
+            if search_query and search_query not in name.lower() and search_query not in url.lower():
+                continue
+                
             is_active = (url == active_url)
             
-            pl_type = _t("pl_type_local")
-            if pl.get("xtream"):
-                pl_type = _t("pl_type_xtream")
-            elif not pl.get("is_local"):
-                pl_type = _t("pl_type_url")
-                
-            display_text = f"{name} ({pl_type})"
-            if is_active:
-                display_text = "⭐ " + display_text
-                
-            item = QListWidgetItem(display_text)
+            item = QListWidgetItem()
+            item.setSizeHint(QSize(450, 52))
             item.setData(Qt.UserRole, pl)
+            
             self.list_widget.addItem(item)
+            
+            widget = PlaylistItemWidget(pl, is_active, self)
+            self.list_widget.setItemWidget(item, widget)
             
             if is_active:
                 self.list_widget.setCurrentItem(item)
@@ -2263,6 +2411,18 @@ class PlaylistManagerDialog(QDialog):
             QLabel {
                 color: #ffffff;
             }
+            QLineEdit#PlaylistSearch {
+                background-color: #121214;
+                border: 1px solid #282830;
+                border-radius: 6px;
+                padding: 8px 12px;
+                color: #ffffff;
+                font-family: "Outfit";
+                font-size: 13px;
+            }
+            QLineEdit#PlaylistSearch:focus {
+                border: 1px solid #7c4dff;
+            }
             QListWidget#PlaylistList {
                 background-color: #121214;
                 border: 1px solid #282830;
@@ -2271,22 +2431,79 @@ class PlaylistManagerDialog(QDialog):
                 padding: 5px;
             }
             QListWidget#PlaylistList::item {
-                padding: 8px;
-                border-radius: 4px;
+                border-bottom: 1px solid #1a1a20;
+                border-radius: 6px;
+                margin-bottom: 2px;
             }
             QListWidget#PlaylistList::item:hover {
                 background-color: #232329;
             }
             QListWidget#PlaylistList::item:selected {
                 background-color: #2a2240;
-                color: #ffffff;
                 border-left: 3px solid #7c4dff;
+            }
+            QPushButton#PlaylistActionBtn {
+                background-color: #232329;
+                border: 1px solid #282830;
+                border-radius: 6px;
+                color: #e0e0e6;
+                padding: 8px 12px;
+                font-family: "Outfit";
+                font-size: 12px;
+                text-align: left;
+            }
+            QPushButton#PlaylistActionBtn:hover {
+                background-color: #2e2e38;
+                border: 1px solid #3d3d4a;
+                color: #ffffff;
+            }
+            QPushButton#PlaylistActionBtn:pressed {
+                background-color: #1e1e24;
+            }
+            QPushButton#PlaylistDeleteBtn {
+                background-color: #2a1b1b;
+                border: 1px solid #4a2828;
+                border-radius: 6px;
+                color: #ff5252;
+                padding: 8px 12px;
+                font-family: "Outfit";
+                font-size: 12px;
+                text-align: left;
+            }
+            QPushButton#PlaylistDeleteBtn:hover {
+                background-color: #3d2323;
+                border: 1px solid #663333;
+                color: #ff8a8a;
+            }
+            QPushButton#PlaylistDeleteBtn:pressed {
+                background-color: #201313;
+            }
+            QDialogButtonBox QPushButton {
+                background-color: #232329;
+                border: 1px solid #282830;
+                border-radius: 6px;
+                color: #ffffff;
+                padding: 6px 16px;
+                font-family: "Outfit";
+                min-width: 80px;
+            }
+            QDialogButtonBox QPushButton:hover {
+                background-color: #2e2e38;
+                border: 1px solid #3d3d4a;
+            }
+            QDialogButtonBox QPushButton[text="OK"], QDialogButtonBox QPushButton[text="Ok"] {
+                background-color: #7c4dff;
+                border: 1px solid #7c4dff;
+            }
+            QDialogButtonBox QPushButton[text="OK"]:hover, QDialogButtonBox QPushButton[text="Ok"]:hover {
+                background-color: #9575cd;
             }
             QLineEdit {
                 background-color: #121214;
                 border: 1px solid #282830;
                 border-radius: 6px;
                 padding: 6px;
+                color: #ffffff;
             }
         """
         self.setStyleSheet(style)
