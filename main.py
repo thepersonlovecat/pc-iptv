@@ -3,6 +3,7 @@ import sys
 import locale
 import json
 import requests
+import weakref
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QListWidget, QListWidgetItem, QLineEdit, QPushButton, QLabel,
@@ -10,7 +11,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QStackedWidget, QDialog, QFormLayout, QDialogButtonBox,
     QMenu, QGridLayout, QGraphicsDropShadowEffect, QCheckBox
 )
-from PySide6.QtCore import Qt, QSize, QTimer, QObject, Signal, QThread, QPropertyAnimation, QEasingCurve, QEvent
+from PySide6.QtCore import Qt, QSize, QTimer, QObject, Signal, QThread, QPropertyAnimation, QEasingCurve, QEvent, QCoreApplication
 from PySide6.QtGui import QIcon, QFont, QColor, QPalette, QAction, QCursor, QKeySequence, QShortcut, QPainter, QPen
 
 # Set locale for numeric formatting as required by libmpv
@@ -505,14 +506,15 @@ def _t(key, default=""):
 load_app_language()
 
 
+_SEARCH_TRANS_MAP = str.maketrans(
+    'àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ',
+    'aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyyd'
+)
+
 def clean_search_string(s):
     if not s:
         return ""
-    s = s.lower()
-    s1 = 'àáảãạăằắẳẵặâầấẩẫậèéẻẽẹêềếểễệìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵđ'
-    s2 = 'aaaaaaaaaaaaaaaaaeeeeeeeeeeeiiiiiooooooooooooooooouuuuuuuuuuuyyyyyd'
-    trans = str.maketrans(s1, s2)
-    return s.translate(trans)
+    return s.lower().translate(_SEARCH_TRANS_MAP)
 
 
 class MpvSignals(QObject):
@@ -601,18 +603,24 @@ class LogoManager(QObject):
         self.queue = []
         self.active_downloads = 0
         self.max_concurrent = 4
+        self.widgets_by_url = {}
 
-    def fetch_logo(self, url):
+    def fetch_logo(self, url, widget):
         if not url:
             return
         if url in _logo_mem_cache:
+            widget._apply_logo_pixmap(_logo_mem_cache[url])
             return
             
         px = _load_logo_from_disk(url)
         if px:
             _logo_mem_cache[url] = px
-            self.logo_downloaded.emit(url, px)
+            widget._apply_logo_pixmap(px)
             return
+            
+        if url not in self.widgets_by_url:
+            self.widgets_by_url[url] = set()
+        self.widgets_by_url[url].add(weakref.ref(widget))
             
         if url not in self.queue:
             self.queue.append(url)
@@ -635,6 +643,15 @@ class LogoManager(QObject):
     def _on_worker_logo_ready(self, url, px):
         _logo_mem_cache[url] = px
         self.logo_downloaded.emit(url, px)
+        
+        widgets_refs = self.widgets_by_url.pop(url, set())
+        for ref in widgets_refs:
+            widget = ref()
+            if widget is not None:
+                try:
+                    widget._apply_logo_pixmap(px)
+                except Exception:
+                    pass
 
     def _on_worker_finished(self, worker):
         self.active_downloads -= 1
@@ -655,7 +672,7 @@ class ChannelItemWidget(QWidget):
         self._logo_worker = None
         
         # Transparent background for custom widgets to inherit theme backgrounds
-        self.setStyleSheet("background: transparent; border: none;")
+        self.setObjectName("ChannelItemWidget")
         
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 6, 12, 6)
@@ -663,12 +680,14 @@ class ChannelItemWidget(QWidget):
 
         # Status indicator dot
         self.lbl_status = QLabel(self)
+        self.lbl_status.setObjectName("ChannelItemStatus")
         self.lbl_status.setFixedSize(8, 8)
         self.set_status_style(is_alive)
         layout.addWidget(self.lbl_status)
         
         # ── Channel Logo ─────────────────────────────────────────────────────
         self.lbl_logo = QLabel(self)
+        self.lbl_logo.setObjectName("ChannelItemLogo")
         self.lbl_logo.setFixedSize(34, 34)
         self.lbl_logo.setAlignment(Qt.AlignCenter)
         self.lbl_logo.setScaledContents(False)
@@ -681,8 +700,7 @@ class ChannelItemWidget(QWidget):
                 self._apply_logo_pixmap(_logo_mem_cache[logo_url])
             else:
                 self._logo_url = logo_url
-                logo_manager.logo_downloaded.connect(self._on_global_logo_ready)
-                logo_manager.fetch_logo(logo_url)
+                logo_manager.fetch_logo(logo_url, self)
         
         # Text container for Name and EPG
         text_layout = QVBoxLayout()
@@ -691,18 +709,19 @@ class ChannelItemWidget(QWidget):
         
         # Channel Name
         self.lbl_name = QLabel(name, self)
-        self.lbl_name.setStyleSheet("color: #e0e0e6; font-weight: 500; background: transparent; font-size: 12px;")
+        self.lbl_name.setObjectName("ChannelItemName")
         self.lbl_name.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         text_layout.addWidget(self.lbl_name)
         
         # EPG program
         self.lbl_epg = QLabel(self)
+        self.lbl_epg.setObjectName("ChannelItemEpg")
         if current_program:
             self.lbl_epg.setText(current_program)
-            self.lbl_epg.setStyleSheet("color: #00e5ff; background: transparent; font-size: 10px;")
+            self.lbl_epg.setProperty("has_epg", "true")
         else:
             self.lbl_epg.setText("")
-            self.lbl_epg.setStyleSheet("color: #888896; background: transparent; font-size: 10px;")
+            self.lbl_epg.setProperty("has_epg", "false")
         self.lbl_epg.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         text_layout.addWidget(self.lbl_epg)
         
@@ -718,15 +737,16 @@ class ChannelItemWidget(QWidget):
         
         # Add latency badge if active
         self.lbl_latency = QLabel(self)
+        self.lbl_latency.setObjectName("ChannelItemLatency")
         self.lbl_latency.setVisible(False)
         self.lbl_latency.setAlignment(Qt.AlignCenter)
         self.badges_layout.addWidget(self.lbl_latency)
         
         # Detect and add resolution / framerate badges
         badges = self.detect_badges(name)
-        for badge_text, style in badges:
+        for badge_text, badge_class in badges:
             lbl_badge = QLabel(badge_text, self)
-            lbl_badge.setStyleSheet(style)
+            lbl_badge.setProperty("class", badge_class)
             lbl_badge.setAlignment(Qt.AlignCenter)
             self.badges_layout.addWidget(lbl_badge)
             
@@ -735,6 +755,7 @@ class ChannelItemWidget(QWidget):
             
         # Favorite star button
         self.btn_fav = QPushButton(self)
+        self.btn_fav.setObjectName("ChannelItemFav")
         self.btn_fav.setFixedSize(26, 26)
         self.btn_fav.setCursor(QCursor(Qt.PointingHandCursor))
         
@@ -762,23 +783,21 @@ class ChannelItemWidget(QWidget):
     def _update_star_icon(self):
         if self.is_fav:
             self.btn_fav.setText("★")
-            self.btn_fav.setStyleSheet("QPushButton { color: #ffd54f; font-size: 17px; background: transparent; border: none; } QPushButton:hover { color: #ffe082; }")
+            self.btn_fav.setProperty("fav", "true")
         else:
             self.btn_fav.setText("☆")
-            self.btn_fav.setStyleSheet("QPushButton { color: rgba(220, 220, 240, 70); font-size: 17px; background: transparent; border: none; } QPushButton:hover { color: rgba(220, 220, 240, 200); }")
+            self.btn_fav.setProperty("fav", "false")
+        self.btn_fav.style().unpolish(self.btn_fav)
+        self.btn_fav.style().polish(self.btn_fav)
 
     def _set_logo_placeholder(self, name: str):
         """Show a stylised initials badge as placeholder until the real logo loads."""
         initial = name[0].upper() if name else "?"
         self.lbl_logo.setText(initial)
         self.lbl_logo.setFont(QFont("Outfit", 13, QFont.Bold))
-        self.lbl_logo.setStyleSheet(
-            "color: rgba(220,220,240,200);"
-            "background: qlineargradient(x1:0,y1:0,x2:1,y2:1,"
-            "stop:0 rgba(50,40,80,180), stop:1 rgba(30,30,50,180));"
-            "border: 1px solid rgba(255,255,255,30);"
-            "border-radius: 8px;"
-        )
+        self.lbl_logo.setProperty("has_logo", "false")
+        self.lbl_logo.style().unpolish(self.lbl_logo)
+        self.lbl_logo.style().polish(self.lbl_logo)
 
     def _apply_logo_pixmap(self, px: QPixmap):
         """Scale & apply a logo pixmap with rounded-rect masking."""
@@ -799,11 +818,9 @@ class ChannelItemWidget(QWidget):
         painter.end()
         self.lbl_logo.setPixmap(rounded)
         self.lbl_logo.setText("")
-        self.lbl_logo.setStyleSheet(
-            "background: rgba(20,20,28,160);"
-            "border: 1px solid rgba(255,255,255,20);"
-            "border-radius: 8px;"
-        )
+        self.lbl_logo.setProperty("has_logo", "true")
+        self.lbl_logo.style().unpolish(self.lbl_logo)
+        self.lbl_logo.style().polish(self.lbl_logo)
 
     def _on_global_logo_ready(self, url: str, px: QPixmap):
         if url == getattr(self, '_logo_url', None):
@@ -819,43 +836,34 @@ class ChannelItemWidget(QWidget):
         
         # 4K / UHD
         if "4K" in name_upper or "UHD" in name_upper:
-            detected.append(("4K", "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7c4dff, stop:1 #b388ff); color: white; font-weight: bold; border-radius: 4px; padding: 2px 6px; font-size: 9px;"))
+            detected.append(("4K", "Badge4K"))
         # FHD / 1080p
         elif "FHD" in name_upper or "1080" in name_upper:
-            detected.append(("FHD", "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00b0ff, stop:1 #00e5ff); color: #121214; font-weight: bold; border-radius: 4px; padding: 2px 6px; font-size: 9px;"))
+            detected.append(("FHD", "BadgeFHD"))
         # HD / 720p
         elif "HD" in name_upper or "720" in name_upper:
-            detected.append(("HD", "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00e676, stop:1 #69f0ae); color: #121214; font-weight: bold; border-radius: 4px; padding: 2px 6px; font-size: 9px;"))
+            detected.append(("HD", "BadgeHD"))
             
         # FPS
         if "60FPS" in name_upper or "60 FPS" in name_upper:
-            detected.append(("60FPS", "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ff6d00, stop:1 #ffab40); color: white; font-weight: bold; border-radius: 4px; padding: 2px 6px; font-size: 9px;"))
+            detected.append(("60FPS", "Badge60FPS"))
         elif "50FPS" in name_upper or "50 FPS" in name_upper:
-            detected.append(("50FPS", "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ff9100, stop:1 #ffd600); color: #121214; font-weight: bold; border-radius: 4px; padding: 2px 6px; font-size: 9px;"))
+            detected.append(("50FPS", "Badge50FPS"))
             
         return detected
 
     def set_status_style(self, is_alive):
         if is_alive is True:
-            self.lbl_status.setStyleSheet("""
-                background-color: #00e676;
-                border-radius: 4px;
-                border: 1px solid rgba(255, 255, 255, 0.2);
-            """)
+            self.lbl_status.setProperty("status", "online")
             self.lbl_status.setToolTip(_t("status_online"))
         elif is_alive is False:
-            self.lbl_status.setStyleSheet("""
-                background-color: #ff1744;
-                border-radius: 4px;
-                border: 1px solid rgba(255, 255, 255, 0.2);
-            """)
+            self.lbl_status.setProperty("status", "offline")
             self.lbl_status.setToolTip(_t("status_offline"))
         else:
-            self.lbl_status.setStyleSheet("""
-                background-color: rgba(255, 255, 255, 0.15);
-                border-radius: 4px;
-            """)
+            self.lbl_status.setProperty("status", "untested")
             self.lbl_status.setToolTip(_t("status_untested"))
+        self.lbl_status.style().unpolish(self.lbl_status)
+        self.lbl_status.style().polish(self.lbl_status)
 
     def set_status(self, is_alive, latency_ms=-1):
         self.is_alive = is_alive
@@ -872,15 +880,16 @@ class ChannelItemWidget(QWidget):
         self.lbl_latency.setText(f"{latency_ms}ms")
         self.lbl_latency.setVisible(True)
         
-        # Dynamic color coding for low/med/high latency
         if latency_ms < 150:
-            style = "background-color: #2e7d32; color: #ffffff; font-weight: bold; border-radius: 4px; padding: 2px 5px; font-size: 9px; line-height: 12px;"
+            speed = "low"
         elif latency_ms < 400:
-            style = "background-color: #ef6c00; color: #ffffff; font-weight: bold; border-radius: 4px; padding: 2px 5px; font-size: 9px; line-height: 12px;"
+            speed = "medium"
         else:
-            style = "background-color: #c62828; color: #ffffff; font-weight: bold; border-radius: 4px; padding: 2px 5px; font-size: 9px; line-height: 12px;"
+            speed = "high"
             
-        self.lbl_latency.setStyleSheet(style)
+        self.lbl_latency.setProperty("speed", speed)
+        self.lbl_latency.style().unpolish(self.lbl_latency)
+        self.lbl_latency.style().polish(self.lbl_latency)
 
 
 class PlaylistDownloadWorker(QThread):
@@ -3021,6 +3030,7 @@ class K20IPTVPlayer(QMainWindow):
         # Channel active/dead statuses and latencies
         self.channel_statuses = {}
         self.channel_latencies = {}
+        self.visible_widgets = {}
         self.checker_thread = None
         
         # EPG Setup
@@ -3032,6 +3042,12 @@ class K20IPTVPlayer(QMainWindow):
         self.sleep_countdown_timer = QTimer(self)
         self.sleep_countdown_timer.setInterval(1000)
         self.sleep_countdown_timer.timeout.connect(self.update_sleep_timer)
+        
+        # Search debounce timer
+        self.search_timer = QTimer(self)
+        self.search_timer.setSingleShot(True)
+        self.search_timer.setInterval(300)
+        self.search_timer.timeout.connect(self.filter_channels)
         
         self.setup_ui()
         self.setup_players()
@@ -3285,7 +3301,7 @@ class K20IPTVPlayer(QMainWindow):
         self.search_bar = QLineEdit(self.channel_panel)
         self.search_bar.setPlaceholderText(_t("search_placeholder"))
         self.search_bar.setObjectName("SearchBar")
-        self.search_bar.textChanged.connect(self.filter_channels)
+        self.search_bar.textChanged.connect(self.search_timer.start)
         layout.addWidget(self.search_bar)
         
         # Horizontal Layout for Category selector & Sort selector
@@ -3863,6 +3879,10 @@ class K20IPTVPlayer(QMainWindow):
             self.channel_list.addItem(_t("empty_playlist_error"))
             return
             
+        # Precompute clean search names for fast filtering
+        for c in self.channels:
+            c["search_name"] = clean_search_string(c.get("name", ""))
+            
         # Automatic EPG Loading
         active_epg = epg_url or self.get_active_epg_url()
         if active_epg:
@@ -3913,13 +3933,12 @@ class K20IPTVPlayer(QMainWindow):
         self.channel_statuses[url] = is_alive
         self.channel_latencies[url] = latency_ms
         
-        # Dynamically update the visual status and latency of items in the QListWidget
-        for i in range(self.channel_list.count()):
-            item = self.channel_list.item(i)
-            widget = self.channel_list.itemWidget(item)
-            if widget and hasattr(widget, 'url') and widget.url == url:
+        widget = self.visible_widgets.get(url)
+        if widget:
+            try:
                 widget.set_status(is_alive, latency_ms)
-                break
+            except Exception:
+                pass
 
     def filter_channels(self):
         query = self.search_bar.text().strip()
@@ -3927,6 +3946,7 @@ class K20IPTVPlayer(QMainWindow):
         selected_cat = self.cat_selector.currentText()
         
         self.channel_list.clear()
+        self.visible_widgets = {}
         self.filtered_channels = []
         
         raw_list = []
@@ -3946,7 +3966,10 @@ class K20IPTVPlayer(QMainWindow):
             
             # Text search filter
             if query:
-                name_clean = clean_search_string(name)
+                name_clean = c.get("search_name")
+                if name_clean is None:
+                    name_clean = clean_search_string(name)
+                    c["search_name"] = name_clean
                 if query_clean not in name_clean:
                     continue
                 
@@ -3998,44 +4021,55 @@ class K20IPTVPlayer(QMainWindow):
         self.load_more_channels()
 
     def load_more_channels(self):
+        if getattr(self, 'is_loading_more', False):
+            return
         if not hasattr(self, 'filtered_channels') or not self.filtered_channels:
             return
             
         start_idx = getattr(self, 'loaded_item_count', 0)
-        batch_size = 150
-        end_idx = min(start_idx + batch_size, len(self.filtered_channels))
-        
         if start_idx >= len(self.filtered_channels):
             return
             
-        self.channel_list.blockSignals(True)
-        for i in range(start_idx, end_idx):
-            c = self.filtered_channels[i]
-            name = c.get("name", "")
-            url = c.get("url", "")
-            tvg_id = c.get("tvg-id", "")
-            logo_url = c.get("logo", "")
+        self.is_loading_more = True
+        try:
+            batch_size = 150
+            end_idx = min(start_idx + batch_size, len(self.filtered_channels))
             
-            is_alive = self.channel_statuses.get(url, None)
-            latency_ms = self.channel_latencies.get(url, -1)
-            
-            # Fetch current EPG program if available
-            current_prog = ""
-            if tvg_id or name:
-                prog = epg_manager.get_current_program(tvg_id, name)
-                if prog:
-                    current_prog = prog.get("title", "")
-            
-            widget = ChannelItemWidget(name, url, tvg_id, is_alive, latency_ms, logo_url, current_prog)
-            
-            item = QListWidgetItem()
-            item.setSizeHint(QSize(0, 58))
-            self.channel_list.addItem(item)
-            self.channel_list.setItemWidget(item, widget)
-            
-        self.loaded_item_count = end_idx
-        self.channel_list.blockSignals(False)
-        print(f"[+] Lazy loaded channels: {start_idx} to {end_idx} of {len(self.filtered_channels)}")
+            self.channel_list.blockSignals(True)
+            for i in range(start_idx, end_idx):
+                c = self.filtered_channels[i]
+                name = c.get("name", "")
+                url = c.get("url", "")
+                tvg_id = c.get("tvg-id", "")
+                logo_url = c.get("logo", "")
+                
+                is_alive = self.channel_statuses.get(url, None)
+                latency_ms = self.channel_latencies.get(url, -1)
+                
+                # Fetch current EPG program if available
+                current_prog = ""
+                if tvg_id or name:
+                    prog = epg_manager.get_current_program(tvg_id, name)
+                    if prog:
+                        current_prog = prog.get("title", "")
+                
+                widget = ChannelItemWidget(name, url, tvg_id, is_alive, latency_ms, logo_url, current_prog)
+                
+                item = QListWidgetItem()
+                item.setSizeHint(QSize(0, 58))
+                self.channel_list.addItem(item)
+                self.channel_list.setItemWidget(item, widget)
+                self.visible_widgets[url] = widget
+                
+                # Yield to the event loop every 30 items to keep UI responsive
+                if (i - start_idx + 1) % 30 == 0:
+                    QCoreApplication.processEvents()
+                    
+            self.loaded_item_count = end_idx
+            self.channel_list.blockSignals(False)
+            print(f"[+] Lazy loaded channels: {start_idx} to {end_idx} of {len(self.filtered_channels)}")
+        finally:
+            self.is_loading_more = False
 
     def on_list_scroll(self, value):
         scrollbar = self.channel_list.verticalScrollBar()
@@ -5298,6 +5332,123 @@ class K20IPTVPlayer(QMainWindow):
                 background-color: rgba(124, 77, 255, 0.18);
                 border: 1px solid rgba(124, 77, 255, 0.6);
                 color: #ffffff;
+            }
+            
+            /* Optimized ChannelItemWidget components styles */
+            QWidget#ChannelItemWidget {
+                background: transparent;
+                border: none;
+            }
+            QLabel#ChannelItemName {
+                color: #e0e0e6;
+                font-weight: 500;
+                background: transparent;
+                font-size: 12px;
+            }
+            QLabel#ChannelItemEpg {
+                color: #888896;
+                background: transparent;
+                font-size: 10px;
+            }
+            QLabel#ChannelItemEpg[has_epg="true"] {
+                color: #00e5ff;
+            }
+            QPushButton#ChannelItemFav {
+                color: rgba(220, 220, 240, 70);
+                font-size: 17px;
+                background: transparent;
+                border: none;
+            }
+            QPushButton#ChannelItemFav:hover {
+                color: rgba(220, 220, 240, 200);
+            }
+            QPushButton#ChannelItemFav[fav="true"] {
+                color: #ffd54f;
+            }
+            QPushButton#ChannelItemFav[fav="true"]:hover {
+                color: #ffe082;
+            }
+            QLabel#ChannelItemStatus {
+                border-radius: 4px;
+            }
+            QLabel#ChannelItemStatus[status="online"] {
+                background-color: #00e676;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+            }
+            QLabel#ChannelItemStatus[status="offline"] {
+                background-color: #ff1744;
+                border: 1px solid rgba(255, 255, 255, 0.2);
+            }
+            QLabel#ChannelItemStatus[status="untested"] {
+                background-color: rgba(255, 255, 255, 0.15);
+            }
+            QLabel#ChannelItemLogo {
+                border-radius: 8px;
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 rgba(50, 40, 80, 180), stop:1 rgba(30, 30, 50, 180));
+                border: 1px solid rgba(255, 255, 255, 30);
+            }
+            QLabel#ChannelItemLogo[has_logo="true"] {
+                background: rgba(20, 20, 28, 160);
+                border: 1px solid rgba(255, 255, 255, 20);
+            }
+            QLabel#ChannelItemLatency {
+                color: #ffffff;
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 2px 5px;
+                font-size: 9px;
+                line-height: 12px;
+            }
+            QLabel#ChannelItemLatency[speed="low"] {
+                background-color: #2e7d32;
+            }
+            QLabel#ChannelItemLatency[speed="medium"] {
+                background-color: #ef6c00;
+            }
+            QLabel#ChannelItemLatency[speed="high"] {
+                background-color: #c62828;
+            }
+            
+            /* Badges */
+            QLabel.Badge4K {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #7c4dff, stop:1 #b388ff);
+                color: white;
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 2px 6px;
+                font-size: 9px;
+            }
+            QLabel.BadgeFHD {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00b0ff, stop:1 #00e5ff);
+                color: #121214;
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 2px 6px;
+                font-size: 9px;
+            }
+            QLabel.BadgeHD {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #00e676, stop:1 #69f0ae);
+                color: #121214;
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 2px 6px;
+                font-size: 9px;
+            }
+            QLabel.Badge60FPS {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ff6d00, stop:1 #ffab40);
+                color: white;
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 2px 6px;
+                font-size: 9px;
+            }
+            QLabel.Badge50FPS {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #ff9100, stop:1 #ffd600);
+                color: #121214;
+                font-weight: bold;
+                border-radius: 4px;
+                padding: 2px 6px;
+                font-size: 9px;
             }
             
             QListWidget#EpgList {

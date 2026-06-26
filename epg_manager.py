@@ -228,45 +228,134 @@ def load_epg_cache():
             
     if parsed_any:
         print("[+] Loaded EPG data into SQLite cache successfully.")
+        clear_epg_channels_cache()
         return True
         
     return False
+
+# Cache of unique channel IDs in SQLite to avoid querying it repeatedly
+_db_channels_cache = None
+_db_channels_normalized = None
+_epg_match_cache = {}
+_db_channels_lock = threading.Lock()
+
+def clear_epg_channels_cache():
+    global _db_channels_cache, _db_channels_normalized, _epg_match_cache
+    with _db_channels_lock:
+        _db_channels_cache = None
+        _db_channels_normalized = None
+        _epg_match_cache.clear()
 
 def get_schedule(tvg_id, channel_name):
     """
     Returns the schedule list of dicts for a channel from SQLite.
     """
+    tvg_id = tvg_id or ""
+    channel_name = channel_name or ""
+    cache_key = (tvg_id, channel_name)
+    
+    global _epg_match_cache
+    with _db_channels_lock:
+        if cache_key in _epg_match_cache:
+            key = _epg_match_cache[cache_key]
+            if key is None:
+                return []
+            try:
+                conn = get_db_conn()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT start_time, stop_time, title, desc 
+                    FROM programmes 
+                    WHERE channel_id = ? 
+                    ORDER BY start_time ASC
+                """, (key,))
+                rows = cursor.fetchall()
+                conn.close()
+                schedule = []
+                for r in rows:
+                    start_dt = datetime.fromtimestamp(r[0], tz=timezone.utc).astimezone()
+                    stop_dt = datetime.fromtimestamp(r[1], tz=timezone.utc).astimezone()
+                    schedule.append({
+                        'start': start_dt,
+                        'stop': stop_dt,
+                        'title': r[2],
+                        'desc': r[3]
+                    })
+                return schedule
+            except Exception as e:
+                print(f"[-] Error querying cached schedule: {e}")
+                return []
+
     try:
         conn = get_db_conn()
         cursor = conn.cursor()
         
-        # Get all unique channel IDs to execute matching algorithm
-        cursor.execute("SELECT DISTINCT channel_id FROM programmes")
-        db_channels = [r[0] for r in cursor.fetchall()]
-        
-        key = tvg_id if tvg_id in db_channels else None
-        if not key:
-            norm_channel = normalize_name(channel_name)
-            if norm_channel:
-                # 1. Exact match of normalized name
-                for chan_id in db_channels:
-                    if normalize_name(chan_id) == norm_channel:
+        # 1. Try direct match first if tvg_id is provided
+        if tvg_id:
+            cursor.execute("""
+                SELECT start_time, stop_time, title, desc 
+                FROM programmes 
+                WHERE channel_id = ? 
+                ORDER BY start_time ASC
+            """, (tvg_id,))
+            rows = cursor.fetchall()
+            if rows:
+                conn.close()
+                with _db_channels_lock:
+                    _epg_match_cache[cache_key] = tvg_id
+                schedule = []
+                for r in rows:
+                    start_dt = datetime.fromtimestamp(r[0], tz=timezone.utc).astimezone()
+                    stop_dt = datetime.fromtimestamp(r[1], tz=timezone.utc).astimezone()
+                    schedule.append({
+                        'start': start_dt,
+                        'stop': stop_dt,
+                        'title': r[2],
+                        'desc': r[3]
+                    })
+                return schedule
+                
+        # 2. If direct match fails or no tvg_id, do similarity matching on all channel IDs
+        global _db_channels_cache, _db_channels_normalized
+        db_channels = None
+        db_channels_norm = None
+        with _db_channels_lock:
+            if _db_channels_cache is not None:
+                db_channels = _db_channels_cache
+                db_channels_norm = _db_channels_normalized
+                
+        if db_channels is None:
+            cursor.execute("SELECT DISTINCT channel_id FROM programmes")
+            db_channels = [r[0] for r in cursor.fetchall()]
+            db_channels_norm = [(chan, normalize_name(chan)) for chan in db_channels]
+            with _db_channels_lock:
+                _db_channels_cache = db_channels
+                _db_channels_normalized = db_channels_norm
+                
+        key = None
+        norm_channel = normalize_name(channel_name)
+        if norm_channel:
+            # 1. Exact match of normalized name
+            for chan_id, norm_id in db_channels_norm:
+                if norm_id == norm_channel:
+                    key = chan_id
+                    break
+            
+            # 2. Substring match of normalized name (avoid false matches with numeric suffixes)
+            if not key:
+                for chan_id, norm_id in db_channels_norm:
+                    if norm_channel in norm_id or norm_id in norm_channel:
+                        # Prevent false positives (e.g. VTV3 and VTV30)
+                        m1 = re.search(r'\d+$', norm_channel)
+                        m2 = re.search(r'\d+$', norm_id)
+                        if m1 and m2 and m1.group() != m2.group():
+                            continue
                         key = chan_id
                         break
-                
-                # 2. Substring match of normalized name (avoid false matches with numeric suffixes)
-                if not key:
-                    for chan_id in db_channels:
-                        norm_id = normalize_name(chan_id)
-                        if norm_channel in norm_id or norm_id in norm_channel:
-                            # Prevent false positives (e.g. VTV3 and VTV30)
-                            m1 = re.search(r'\d+$', norm_channel)
-                            m2 = re.search(r'\d+$', norm_id)
-                            if m1 and m2 and m1.group() != m2.group():
-                                continue
-                            key = chan_id
-                            break
                             
+        with _db_channels_lock:
+            _epg_match_cache[cache_key] = key
+
         if not key:
             conn.close()
             return []
