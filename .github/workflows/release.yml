@@ -25,14 +25,17 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller PySide6 requests
+          pip install pyinstaller PySide6 requests python-mpv
 
       - name: Download mpv DLLs
         run: |
           python download_mpv_dll.py
 
       - name: Build with PyInstaller
+        shell: pwsh
         run: |
+          $env:PATH = "$PWD;$env:PATH"
+          python -c "import mpv; print('python-mpv OK:', mpv.__file__)"
           pyinstaller K20_IPTV_Player.spec --clean
 
       - name: Compress Release Archive
@@ -46,4 +49,3 @@ jobs:
           files: dist/K20_IPTV_Player.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-

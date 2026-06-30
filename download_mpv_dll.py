@@ -172,4 +172,4 @@ def download_and_extract_mpv_dll():
         return False
 
 if __name__ == "__main__":
-    download_and_extract_mpv_dll()
+    sys.exit(0 if download_and_extract_mpv_dll() else 1)
