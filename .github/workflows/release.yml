@@ -35,9 +35,15 @@ jobs:
         run: |
           pyinstaller K20_IPTV_Player.spec --clean
 
+      - name: Compress Release Archive
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist/K20_IPTV_Player.exe -DestinationPath dist/K20_IPTV_Player.zip
+
       - name: Create GitHub Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/K20_IPTV_Player.exe
+          files: dist/K20_IPTV_Player.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
