@@ -1,3 +1,9 @@
+# 📢 After I found this software, I recommend everyone use it instead of my "bad" software because it has all the features I think I wanted to develop. When I saw it, I no longer wanted to do anything else. Please try it, I think it is the best IPTV Player Zero https://iptvplayerzero.com/
+
+![IPTV Player Zero](screenshots/screenshot_zero.jpg)
+
+---
+
 <div align="center">
 
 # 📺 K20 IPTV Player
